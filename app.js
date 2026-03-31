@@ -1,5 +1,5 @@
-const CURRENT_STORAGE_KEY = 'wnmu-underwriter-intake-v0.5.0';
-const LEGACY_STORAGE_KEYS = ['wnmu-underwriter-intake-v0.4.0', 'wnmu-underwriter-intake-v0.3.1', 'wnmu-underwriter-intake-v0.2.0', 'wnmu-underwriter-intake-v0.1.0'];
+const CURRENT_STORAGE_KEY = 'wnmu-underwriter-intake-v0.5.2';
+const LEGACY_STORAGE_KEYS = ['wnmu-underwriter-intake-v0.5.0', 'wnmu-underwriter-intake-v0.4.0', 'wnmu-underwriter-intake-v0.3.1', 'wnmu-underwriter-intake-v0.2.0', 'wnmu-underwriter-intake-v0.1.0'];
 const OCR_PAGE_LIMIT = 4;
 
 const DEFAULT_CONFIG = {
@@ -32,6 +32,7 @@ const state = {
   cloudClient: null,
   cloudReady: false,
   lastCloudAction: 'None yet',
+  pendingDeleteId: null,
 };
 
 const els = {
@@ -69,6 +70,10 @@ const els = {
   lastCloudAction: document.getElementById('lastCloudAction'),
   pullCloudBtn: document.getElementById('pullCloudBtn'),
   pushCloudBtn: document.getElementById('pushCloudBtn'),
+  confirmModal: document.getElementById('confirmModal'),
+  confirmMessage: document.getElementById('confirmMessage'),
+  confirmCancelBtn: document.getElementById('confirmCancelBtn'),
+  confirmOkBtn: document.getElementById('confirmOkBtn'),
 };
 
 boot();
@@ -137,9 +142,9 @@ function bindEvents() {
   document.getElementById('clearAllBtn').addEventListener('click', clearAllRecords);
   document.getElementById('exportQuarterCsvBtn').addEventListener('click', exportQuarterCsv);
   document.getElementById('copyNarrativeBtn').addEventListener('click', copyNarrative);
-  document.getElementById('saveRecordBtn').addEventListener('click', saveFormToSelected);
+  document.getElementById('saveRecordBtn').addEventListener('click', saveAndCloseSelected);
   document.getElementById('duplicateRecordBtn').addEventListener('click', duplicateSelected);
-  document.getElementById('deleteRecordBtn').addEventListener('click', deleteSelected);
+  document.getElementById('deleteRecordBtn').addEventListener('click', requestDeleteSelected);
 
   els.importJsonInput.addEventListener('change', importJsonBackup);
   [els.searchInput, els.issueFilter, els.quarterStart, els.quarterEnd].forEach((el) => {
@@ -158,27 +163,36 @@ function bindEvents() {
   });
 
   els.closeModalBtn.addEventListener('click', closeModal);
-  els.prevRecordBtn.addEventListener('click', () => navigateModal(-1));
-  els.nextRecordBtn.addEventListener('click', () => navigateModal(1));
+  els.prevRecordBtn.addEventListener('click', () => saveAndNavigate(-1));
+  els.nextRecordBtn.addEventListener('click', () => saveAndNavigate(1));
   els.recordModal.addEventListener('click', (event) => {
     if (event.target.dataset.closeModal === 'true') closeModal();
   });
+  els.confirmModal.addEventListener('click', (event) => {
+    if (event.target.dataset.closeConfirm === 'true') closeConfirmModal();
+  });
+  els.confirmCancelBtn.addEventListener('click', closeConfirmModal);
+  els.confirmOkBtn.addEventListener('click', confirmDeleteSelected);
 
   document.addEventListener('keydown', (event) => {
     if (els.recordModal.classList.contains('hidden')) return;
     if (event.key === 'Escape') {
-      closeModal();
+      if (!els.confirmModal.classList.contains('hidden')) {
+        closeConfirmModal();
+      } else {
+        closeModal();
+      }
       return;
     }
     const tag = document.activeElement?.tagName || '';
     const typing = /INPUT|TEXTAREA|SELECT/.test(tag);
     if (!typing && event.key === 'ArrowLeft') {
       event.preventDefault();
-      navigateModal(-1);
+      saveAndNavigate(-1);
     }
     if (!typing && event.key === 'ArrowRight') {
       event.preventDefault();
-      navigateModal(1);
+      saveAndNavigate(1);
     }
   });
 
@@ -1090,6 +1104,78 @@ function renderNarrative() {
   els.narrativeBox.value = lines.join('\n');
 }
 
+
+function saveSelectedRecord(options = {}) {
+  const { renderAfterSave = true } = options;
+  const record = state.records.find((item) => item.id === state.selectedId);
+  if (!record) return null;
+
+  for (const element of els.recordForm.elements) {
+    if (!element.name || element.name === 'issueSummary') continue;
+    record[element.name] = element.value;
+  }
+
+  recalcFlags();
+  persist();
+  if (renderAfterSave) renderAll();
+  return record;
+}
+
+function saveAndCloseSelected(event) {
+  event?.preventDefault();
+  const record = saveSelectedRecord({ renderAfterSave: true });
+  if (!record) return;
+  syncModal();
+  closeModal();
+  setStatus(`Saved ${record.underwriterName || record.sourceFileName || 'record'}.`);
+}
+
+function saveAndNavigate(offset) {
+  const list = getModalRecordList();
+  const index = list.findIndex((item) => item.id === state.selectedId);
+  const nextIndex = index + offset;
+  if (index === -1 || nextIndex < 0 || nextIndex >= list.length) return;
+
+  const currentRecord = saveSelectedRecord({ renderAfterSave: false });
+  state.selectedId = list[nextIndex].id;
+  renderAll();
+  syncModal();
+  setStatus(`Saved ${currentRecord?.underwriterName || currentRecord?.sourceFileName || 'record'} and moved ${offset > 0 ? 'forward' : 'back'}.`);
+}
+
+function requestDeleteSelected(event) {
+  event?.preventDefault();
+  const record = state.records.find((item) => item.id === state.selectedId);
+  if (!record) return;
+  state.pendingDeleteId = record.id;
+  els.confirmMessage.textContent = `Delete ${record.underwriterName || record.sourceFileName || 'this record'}? This cannot be undone from inside the app.`;
+  els.confirmModal.classList.remove('hidden');
+  els.confirmModal.setAttribute('aria-hidden', 'false');
+}
+
+function closeConfirmModal() {
+  state.pendingDeleteId = null;
+  els.confirmModal.classList.add('hidden');
+  els.confirmModal.setAttribute('aria-hidden', 'true');
+}
+
+function confirmDeleteSelected() {
+  const deleteId = state.pendingDeleteId;
+  if (!deleteId) return;
+  closeConfirmModal();
+  const currentList = getModalRecordList();
+  const currentIndex = currentList.findIndex((item) => item.id === deleteId);
+  state.records = state.records.filter((item) => item.id !== deleteId);
+  const fallback = currentList[currentIndex + 1]?.id || currentList[currentIndex - 1]?.id || state.records[0]?.id || null;
+  state.selectedId = fallback;
+  recalcFlags();
+  persist();
+  renderAll();
+  syncModal();
+  if (!state.selectedId) closeModal();
+  setStatus('Record deleted.');
+}
+
 function openModal(recordId) {
   state.selectedId = recordId;
   syncModal();
@@ -1121,13 +1207,7 @@ function syncModalNavigation() {
 }
 
 function navigateModal(offset) {
-  const list = getModalRecordList();
-  const index = list.findIndex((item) => item.id === state.selectedId);
-  if (index === -1) return;
-  const nextIndex = index + offset;
-  if (nextIndex < 0 || nextIndex >= list.length) return;
-  state.selectedId = list[nextIndex].id;
-  syncModal();
+  saveAndNavigate(offset);
 }
 
 function syncModal() {
@@ -1153,20 +1233,7 @@ function syncModal() {
   syncModalNavigation();
 }
 
-function saveFormToSelected(event) {
-  event?.preventDefault();
-  const record = state.records.find((item) => item.id === state.selectedId);
-  if (!record) return;
-  for (const element of els.recordForm.elements) {
-    if (!element.name || element.name === 'issueSummary') continue;
-    record[element.name] = element.value;
-  }
-  recalcFlags();
-  persist();
-  renderAll();
-  syncModal();
-  setStatus(`Saved ${record.underwriterName || record.sourceFileName || 'record'}.`);
-}
+
 
 function duplicateSelected(event) {
   event?.preventDefault();
@@ -1187,20 +1254,7 @@ function duplicateSelected(event) {
   setStatus('Record duplicated.');
 }
 
-function deleteSelected(event) {
-  event?.preventDefault();
-  const record = state.records.find((item) => item.id === state.selectedId);
-  if (!record) return;
-  if (!confirm(`Delete ${record.underwriterName || record.sourceFileName || 'this record'}?`)) return;
-  state.records = state.records.filter((item) => item.id !== state.selectedId);
-  state.selectedId = state.records[0]?.id || null;
-  recalcFlags();
-  persist();
-  renderAll();
-  syncModal();
-  if (!state.selectedId) closeModal();
-  setStatus('Record deleted.');
-}
+
 
 function clearAllRecords() {
   if (!confirm('Clear the local database? This wipes records stored in this browser.')) return;
