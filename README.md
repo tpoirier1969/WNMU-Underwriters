@@ -1,4 +1,4 @@
-# WNMU Underwriter Intake v0.4.0
+# WNMU Underwriter Intake v0.5.0
 
 This pass cleans up the Supabase side so the app behaves better inside a shared Supabase project instead of living in a generic public-table junk drawer.
 
@@ -55,3 +55,12 @@ It now sits in its own schema and uses explicitly named objects, which is the ri
 ## v0.4.1 change
 
 - Underwriter names in **Quarterly** are now clickable and open the full contract modal, including raw extracted text.
+
+
+## v0.5.0 changes
+
+- Keeps the **Open** button on one line instead of breaking it into two
+- Shrinks and recenters the contract modal so it stays on screen better
+- Adds **previous / next** arrow buttons in the modal to move through contracts
+- Tunes OCR import handling for scanned PDFs with higher-resolution rendering and preprocessing
+- Improves underwriter extraction so scanned contracts are less likely to misread the sponsor name

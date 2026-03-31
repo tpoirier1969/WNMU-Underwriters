@@ -19,7 +19,7 @@
         <p class="subtitle">Contract intake, dedupe review, overlap checks, and quarterly prep</p>
       </div>
       <div class="topbar-right">
-        <div class="version-pill">v0.4.0</div>
+        <div class="version-pill">v0.5.0</div>
         <div id="cloudStatusBadge" class="cloud-pill cloud-local">Cloud: local only</div>
       </div>
     </header>
@@ -191,7 +191,12 @@
           <h2 id="modalTitle">Edit contract</h2>
           <div id="modalSubhead" class="helper-text">No record selected</div>
         </div>
-        <button id="closeModalBtn" type="button" class="icon-button" aria-label="Close">×</button>
+        <div class="modal-header-actions">
+          <div id="modalNavStatus" class="helper-text modal-nav-status">0 / 0</div>
+          <button id="prevRecordBtn" type="button" class="icon-button nav-button" aria-label="Previous contract">←</button>
+          <button id="nextRecordBtn" type="button" class="icon-button nav-button" aria-label="Next contract">→</button>
+          <button id="closeModalBtn" type="button" class="icon-button" aria-label="Close">×</button>
+        </div>
       </div>
 
       <form id="recordForm" class="form-grid">

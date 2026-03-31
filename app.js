@@ -1,5 +1,5 @@
-const CURRENT_STORAGE_KEY = 'wnmu-underwriter-intake-v0.4.0';
-const LEGACY_STORAGE_KEYS = ['wnmu-underwriter-intake-v0.3.1', 'wnmu-underwriter-intake-v0.2.0', 'wnmu-underwriter-intake-v0.1.0'];
+const CURRENT_STORAGE_KEY = 'wnmu-underwriter-intake-v0.5.0';
+const LEGACY_STORAGE_KEYS = ['wnmu-underwriter-intake-v0.4.0', 'wnmu-underwriter-intake-v0.3.1', 'wnmu-underwriter-intake-v0.2.0', 'wnmu-underwriter-intake-v0.1.0'];
 const OCR_PAGE_LIMIT = 4;
 
 const DEFAULT_CONFIG = {
@@ -53,6 +53,9 @@ const els = {
   recordModal: document.getElementById('recordModal'),
   recordForm: document.getElementById('recordForm'),
   modalSubhead: document.getElementById('modalSubhead'),
+  modalNavStatus: document.getElementById('modalNavStatus'),
+  prevRecordBtn: document.getElementById('prevRecordBtn'),
+  nextRecordBtn: document.getElementById('nextRecordBtn'),
   closeModalBtn: document.getElementById('closeModalBtn'),
   importJsonInput: document.getElementById('importJsonInput'),
   sortButtons: [...document.querySelectorAll('.sort-button')],
@@ -155,12 +158,28 @@ function bindEvents() {
   });
 
   els.closeModalBtn.addEventListener('click', closeModal);
+  els.prevRecordBtn.addEventListener('click', () => navigateModal(-1));
+  els.nextRecordBtn.addEventListener('click', () => navigateModal(1));
   els.recordModal.addEventListener('click', (event) => {
     if (event.target.dataset.closeModal === 'true') closeModal();
   });
 
   document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape' && !els.recordModal.classList.contains('hidden')) closeModal();
+    if (els.recordModal.classList.contains('hidden')) return;
+    if (event.key === 'Escape') {
+      closeModal();
+      return;
+    }
+    const tag = document.activeElement?.tagName || '';
+    const typing = /INPUT|TEXTAREA|SELECT/.test(tag);
+    if (!typing && event.key === 'ArrowLeft') {
+      event.preventDefault();
+      navigateModal(-1);
+    }
+    if (!typing && event.key === 'ArrowRight') {
+      event.preventDefault();
+      navigateModal(1);
+    }
   });
 
   els.pullCloudBtn.addEventListener('click', pullFromCloud);
@@ -498,17 +517,45 @@ async function extractPdfText(bytes) {
   for (let pageNumber = 1; pageNumber <= pageLimit; pageNumber += 1) {
     setStatus(`Running OCR on ${pageNumber}/${pageLimit} page(s)...`);
     const page = await pdf.getPage(pageNumber);
-    const viewport = page.getViewport({ scale: 2 });
+    const viewport = page.getViewport({ scale: 3 });
     const canvas = document.createElement('canvas');
-    const context = canvas.getContext('2d');
-    canvas.width = viewport.width;
-    canvas.height = viewport.height;
+    const context = canvas.getContext('2d', { willReadFrequently: true });
+    canvas.width = Math.ceil(viewport.width);
+    canvas.height = Math.ceil(viewport.height);
     await page.render({ canvasContext: context, viewport }).promise;
+    preprocessCanvasForOCR(canvas, context);
     const result = await Tesseract.recognize(canvas, 'eng', { logger: () => {} });
     ocrParts.push(result.data?.text || '');
   }
 
   return { text: normalizeText(ocrParts.join('\n\n')), path: `PDF OCR (${pageLimit} page max)` };
+}
+
+function preprocessCanvasForOCR(canvas, context) {
+  const image = context.getImageData(0, 0, canvas.width, canvas.height);
+  const data = image.data;
+  let total = 0;
+
+  for (let i = 0; i < data.length; i += 4) {
+    const gray = Math.round((data[i] * 0.299) + (data[i + 1] * 0.587) + (data[i + 2] * 0.114));
+    total += gray;
+    data[i] = gray;
+    data[i + 1] = gray;
+    data[i + 2] = gray;
+  }
+
+  const average = total / (data.length / 4 || 1);
+  const threshold = Math.max(150, Math.min(208, average + 14));
+
+  for (let i = 0; i < data.length; i += 4) {
+    const boost = data[i] >= threshold ? 255 : 0;
+    data[i] = boost;
+    data[i + 1] = boost;
+    data[i + 2] = boost;
+    data[i + 3] = 255;
+  }
+
+  context.putImageData(image, 0, 0);
 }
 
 function parseContractText(rawText, fileName = '') {
@@ -521,10 +568,7 @@ function parseContractText(rawText, fileName = '') {
   const phones = uniqueMatches(text.match(/(?:\+?1[-.\s]?)?(?:\(?\d{3}\)?[-.\s]?)\d{3}[-.\s]?\d{4}/g) || []);
 
   const record = makeTrulyBlank();
-  record.underwriterName = findNamedField(text, [
-    /(?:underwriter|sponsor|organization|company|business(?:\s+name)?|client)\s*[:\-]\s*(.+)/i,
-    /(?:this agreement is between|agreement between|contract between)\s+(.+?)\s+(?:and|for)\s+/i,
-  ]) || guessEntityLine(lines, fileName);
+  record.underwriterName = extractUnderwriterName(text, lines, fileName);
 
   record.contractType = detectContractType(lower, lines, fileName);
   record.programName = findNamedField(text, [
@@ -559,7 +603,84 @@ function parseContractText(rawText, fileName = '') {
   ], true) || extractQuotedBlock(text);
 
   if (!record.underwriterName && record.email) record.underwriterName = emailDomainToName(record.email);
+  record.underwriterName = finalizeUnderwriterName(record.underwriterName, record.email) || guessEntityLine(lines, fileName);
   return record;
+}
+
+function extractUnderwriterName(text, lines, fileName = '') {
+  const candidates = [];
+
+  const addCandidate = (value, score, source) => {
+    const cleaned = finalizeUnderwriterName(value);
+    if (!cleaned) return;
+    candidates.push({ value: cleaned, score: scoreCandidate(cleaned, score, source), source });
+  };
+
+  const patterns = [
+    { score: 95, source: 'field', regex: /(?:^|\n)\s*(?:underwriter|sponsor|organization|company|business(?:\s+name)?|client)\b\s*[:._\- ]*\s*([^\n]+)/i },
+    { score: 82, source: 'agreement', regex: /(?:this agreement is between|agreement between|contract between)\s+(.+?)\s+(?:and|for)\s+/i },
+    { score: 98, source: 'audio', regex: /(?:support for .*? is made possible in part by|made possible in part by)\s+(?:the\s+)?(.+?)(?:[\.,;]|\s{2,}|\n|$)/i },
+  ];
+
+  for (const entry of patterns) {
+    const match = text.match(entry.regex);
+    if (match?.[1]) addCandidate(match[1], entry.score, entry.source);
+  }
+
+  for (const line of lines) {
+    if (/^underwriter\b/i.test(line)) {
+      addCandidate(line.replace(/^underwriter\b\s*[:._\- ]*/i, ''), 96, 'line');
+    }
+  }
+
+  addCandidate(guessEntityLine(lines, fileName), 28, 'guess');
+
+  const deduped = new Map();
+  for (const candidate of candidates) {
+    const key = normalizeName(candidate.value) || candidate.value.toLowerCase();
+    const existing = deduped.get(key);
+    if (!existing || candidate.score > existing.score) deduped.set(key, candidate);
+  }
+
+  const ordered = [...deduped.values()].sort((a, b) => b.score - a.score || a.value.length - b.value.length);
+  return ordered[0]?.value || '';
+}
+
+function finalizeUnderwriterName(value, email = '') {
+  let cleaned = String(value || '')
+    .replace(/^[\s_:'"“”.,;|\/\-]+/, '')
+    .replace(/[\s_:'"“”.,;|\/\-]+$/, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!cleaned) return '';
+
+  cleaned = cleaned
+    .replace(/^(?:underwriter|sponsor|client|company)\b[:._\- ]*/i, '')
+    .replace(/\b(?:date|type(?:\s*&\s*amount)?|amount|program|production|promotion|invoice info|certificate|co-op|phone|fax|address|billing address|signature)\b.*$/i, '')
+    .replace(/\b(?:if different|if so, explain)\b.*$/i, '')
+    .replace(/^[Tt]he\s+(?=[A-Z])/, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (email && normalizeName(cleaned) === normalizeName(emailDomainToName(email))) {
+    return emailDomainToName(email);
+  }
+
+  return cleaned;
+}
+
+function scoreCandidate(value, baseScore, source = '') {
+  let score = Number(baseScore || 0);
+  if (!value) return -999;
+  if (value.length < 4 || value.length > 80) score -= 40;
+  if (/\d/.test(value)) score -= 30;
+  if (/(phone|fax|email|address|date|program|production|promotion|contract|invoice|certificate|co-op|signature|manager|representative)/i.test(value)) score -= 60;
+  if (/^[A-Z][A-Za-z'&.-]+(?:\s+[A-Z][A-Za-z'&.-]+){0,5}$/.test(value)) score += 12;
+  if (/(family|llc|inc|corp|corporation|company|clinic|bank|foundation|market|motors|insurance|service|services|cafe|restaurant|brewery|school|hospital|power)/i.test(value)) score += 10;
+  if (source === 'audio') score += 4;
+  if (source === 'field' || source === 'line') score += 3;
+  return score;
 }
 
 function detectContractType(lower, lines, fileName) {
@@ -981,10 +1102,41 @@ function closeModal() {
   els.recordModal.setAttribute('aria-hidden', 'true');
 }
 
+function getModalRecordList() {
+  if (state.currentTab === 'quarterly') {
+    const quarter = getQuarterRange();
+    return getSortedRecords(state.records.filter((record) => activeInQuarter(record, quarter.start, quarter.end)));
+  }
+  if (state.currentTab === 'contracts') return getSortedRecords(getFilteredRecords());
+  return getSortedRecords(state.records);
+}
+
+function syncModalNavigation() {
+  const list = getModalRecordList();
+  const index = list.findIndex((item) => item.id === state.selectedId);
+  const hasRecords = index !== -1 && list.length > 0;
+  els.modalNavStatus.textContent = hasRecords ? `${index + 1} / ${list.length}` : `0 / ${list.length}`;
+  els.prevRecordBtn.disabled = !hasRecords || index <= 0;
+  els.nextRecordBtn.disabled = !hasRecords || index >= list.length - 1;
+}
+
+function navigateModal(offset) {
+  const list = getModalRecordList();
+  const index = list.findIndex((item) => item.id === state.selectedId);
+  if (index === -1) return;
+  const nextIndex = index + offset;
+  if (nextIndex < 0 || nextIndex >= list.length) return;
+  state.selectedId = list[nextIndex].id;
+  syncModal();
+}
+
 function syncModal() {
   const record = state.records.find((item) => item.id === state.selectedId);
   if (!record) {
     els.modalSubhead.textContent = 'No record selected';
+    els.modalNavStatus.textContent = '0 / 0';
+    els.prevRecordBtn.disabled = true;
+    els.nextRecordBtn.disabled = true;
     els.recordForm.reset();
     return;
   }
@@ -998,6 +1150,7 @@ function syncModal() {
     }
     element.value = record[element.name] ?? '';
   }
+  syncModalNavigation();
 }
 
 function saveFormToSelected(event) {
