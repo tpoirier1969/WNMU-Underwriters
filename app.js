@@ -1,5 +1,5 @@
-const CURRENT_STORAGE_KEY = 'wnmu-underwriter-intake-v0.5.3';
-const LEGACY_STORAGE_KEYS = ['wnmu-underwriter-intake-v0.5.2', 'wnmu-underwriter-intake-v0.5.0', 'wnmu-underwriter-intake-v0.4.0', 'wnmu-underwriter-intake-v0.3.1', 'wnmu-underwriter-intake-v0.2.0', 'wnmu-underwriter-intake-v0.1.0'];
+const CURRENT_STORAGE_KEY = 'wnmu-underwriter-intake-v0.5.4';
+const LEGACY_STORAGE_KEYS = ['wnmu-underwriter-intake-v0.5.3', 'wnmu-underwriter-intake-v0.5.2', 'wnmu-underwriter-intake-v0.5.0', 'wnmu-underwriter-intake-v0.4.0', 'wnmu-underwriter-intake-v0.3.1', 'wnmu-underwriter-intake-v0.2.0', 'wnmu-underwriter-intake-v0.1.0'];
 const OCR_PAGE_LIMIT = 4;
 
 const DEFAULT_CONFIG = {
@@ -1130,16 +1130,19 @@ function saveAndCloseSelected(event) {
 }
 
 function saveAndNavigate(offset) {
-  const list = getModalRecordList();
-  const index = list.findIndex((item) => item.id === state.selectedId);
-  const nextIndex = index + offset;
-  if (index === -1 || nextIndex < 0 || nextIndex >= list.length) return;
+  const visibleListBeforeSave = getModalRecordList();
+  const currentIndex = visibleListBeforeSave.findIndex((item) => item.id === state.selectedId);
+  const targetIndex = currentIndex + offset;
+  if (currentIndex === -1 || targetIndex < 0 || targetIndex >= visibleListBeforeSave.length) return;
 
   const currentRecord = saveSelectedRecord({ renderAfterSave: false });
-  state.selectedId = list[nextIndex].id;
+  if (!currentRecord) return;
+
+  const targetRecordId = visibleListBeforeSave[targetIndex].id;
+  state.selectedId = targetRecordId;
   renderAll();
   syncModal();
-  setStatus(`Saved ${currentRecord?.underwriterName || currentRecord?.sourceFileName || 'record'} and moved ${offset > 0 ? 'forward' : 'back'}.`);
+  setStatus(`Saved ${currentRecord.underwriterName || currentRecord.sourceFileName || 'record'} and moved ${offset > 0 ? 'to the next record' : 'to the previous record'}.`);
 }
 
 function requestDeleteSelected(event) {
