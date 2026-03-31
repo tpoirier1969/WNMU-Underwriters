@@ -50,3 +50,8 @@ It now sits in its own schema and uses explicitly named objects, which is the ri
 - PDF OCR can be slow on big scans
 - Exact credit run dates / times are still mainly manual entry for now
 - The future `wnmu_underwriter_credit_runs` table is created now so we can wire detailed run records cleanly in a later pass
+
+
+## v0.4.1 change
+
+- Underwriter names in **Quarterly** are now clickable and open the full contract modal, including raw extracted text.

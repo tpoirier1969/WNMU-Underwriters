@@ -876,14 +876,33 @@ function renderQuarterly() {
 
   for (const record of rows) {
     const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td>${escapeHtml(record.underwriterName || '—')}</td>
-      <td>${escapeHtml(record.placementDetail || record.programName || '—')}</td>
-      <td>${escapeHtml(record.startDate || '—')}</td>
-      <td>${escapeHtml(record.endDate || '—')}</td>
-      <td>${escapeHtml(formatMoney(record.amount))}</td>
-      <td>${escapeHtml(record.creditRuns || '—')}</td>
-    `;
+
+    const underwriterTd = document.createElement('td');
+    const openBtn = document.createElement('button');
+    openBtn.type = 'button';
+    openBtn.className = 'text-button underwriter-link';
+    openBtn.textContent = record.underwriterName || '—';
+    openBtn.title = 'Open full contract';
+    openBtn.setAttribute('aria-label', `Open full contract for ${record.underwriterName || 'selected record'}`);
+    openBtn.addEventListener('click', () => openModal(record.id));
+    underwriterTd.appendChild(openBtn);
+
+    const placementTd = document.createElement('td');
+    placementTd.textContent = record.placementDetail || record.programName || '—';
+
+    const startTd = document.createElement('td');
+    startTd.textContent = record.startDate || '—';
+
+    const endTd = document.createElement('td');
+    endTd.textContent = record.endDate || '—';
+
+    const amountTd = document.createElement('td');
+    amountTd.textContent = formatMoney(record.amount);
+
+    const runsTd = document.createElement('td');
+    runsTd.textContent = record.creditRuns || '—';
+
+    tr.append(underwriterTd, placementTd, startTd, endTd, amountTd, runsTd);
     els.quarterlyBody.appendChild(tr);
   }
 }
