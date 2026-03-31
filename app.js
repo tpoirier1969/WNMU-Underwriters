@@ -1,6 +1,16 @@
-const CURRENT_STORAGE_KEY = 'wnmu-underwriter-intake-v0.2.0';
-const LEGACY_STORAGE_KEYS = ['wnmu-underwriter-intake-v0.1.0'];
+const CURRENT_STORAGE_KEY = 'wnmu-underwriter-intake-v0.3.1';
+const LEGACY_STORAGE_KEYS = ['wnmu-underwriter-intake-v0.2.0', 'wnmu-underwriter-intake-v0.1.0'];
 const OCR_PAGE_LIMIT = 4;
+
+const DEFAULT_CONFIG = {
+  enableSupabase: false,
+  supabaseUrl: '',
+  supabaseAnonKey: '',
+  workspaceKey: 'wnmu-underwriters',
+  cloudTable: 'underwriter_contracts',
+};
+
+const config = { ...DEFAULT_CONFIG, ...(window.WNMU_UNDERWRITER_CONFIG || {}) };
 
 const state = {
   records: [],
@@ -9,6 +19,9 @@ const state = {
   sortKey: 'underwriterName',
   sortDir: 'asc',
   importQueueActive: false,
+  cloudClient: null,
+  cloudReady: false,
+  lastCloudAction: 'None yet',
 };
 
 const els = {
@@ -33,6 +46,14 @@ const els = {
   closeModalBtn: document.getElementById('closeModalBtn'),
   importJsonInput: document.getElementById('importJsonInput'),
   sortButtons: [...document.querySelectorAll('.sort-button')],
+  contractsCountText: document.getElementById('contractsCountText'),
+  cloudStatusBadge: document.getElementById('cloudStatusBadge'),
+  cloudModeText: document.getElementById('cloudModeText'),
+  cloudWorkspace: document.getElementById('cloudWorkspace'),
+  cloudTableText: document.getElementById('cloudTableText'),
+  lastCloudAction: document.getElementById('lastCloudAction'),
+  pullCloudBtn: document.getElementById('pullCloudBtn'),
+  pushCloudBtn: document.getElementById('pushCloudBtn'),
 };
 
 boot();
@@ -40,6 +61,7 @@ boot();
 function boot() {
   loadState();
   bindEvents();
+  initCloudClient();
   recalcFlags();
   renderAll();
 }
@@ -100,18 +122,9 @@ function bindEvents() {
   document.getElementById('clearAllBtn').addEventListener('click', clearAllRecords);
   document.getElementById('exportQuarterCsvBtn').addEventListener('click', exportQuarterCsv);
   document.getElementById('copyNarrativeBtn').addEventListener('click', copyNarrative);
-  document.getElementById('saveRecordBtn').addEventListener('click', (event) => {
-    event.preventDefault();
-    saveFormToSelected();
-  });
-  document.getElementById('duplicateRecordBtn').addEventListener('click', (event) => {
-    event.preventDefault();
-    duplicateSelected();
-  });
-  document.getElementById('deleteRecordBtn').addEventListener('click', (event) => {
-    event.preventDefault();
-    deleteSelected();
-  });
+  document.getElementById('saveRecordBtn').addEventListener('click', saveFormToSelected);
+  document.getElementById('duplicateRecordBtn').addEventListener('click', duplicateSelected);
+  document.getElementById('deleteRecordBtn').addEventListener('click', deleteSelected);
 
   els.importJsonInput.addEventListener('change', importJsonBackup);
   [els.searchInput, els.issueFilter, els.quarterStart, els.quarterEnd].forEach((el) => {
@@ -133,8 +146,171 @@ function bindEvents() {
   els.recordModal.addEventListener('click', (event) => {
     if (event.target.dataset.closeModal === 'true') closeModal();
   });
+
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape' && !els.recordModal.classList.contains('hidden')) closeModal();
+  });
+
+  els.pullCloudBtn.addEventListener('click', pullFromCloud);
+  els.pushCloudBtn.addEventListener('click', pushAllToCloud);
+}
+
+function initCloudClient() {
+  const canEnable = Boolean(
+    config.enableSupabase
+    && config.supabaseUrl
+    && config.supabaseAnonKey
+    && window.supabase?.createClient,
+  );
+
+  if (canEnable) {
+    state.cloudClient = window.supabase.createClient(config.supabaseUrl, config.supabaseAnonKey);
+    state.cloudReady = true;
+    state.lastCloudAction = 'Cloud ready';
+  } else {
+    state.cloudClient = null;
+    state.cloudReady = false;
+    if (!config.enableSupabase) state.lastCloudAction = 'Cloud disabled in config.js';
+    else if (!config.supabaseUrl || !config.supabaseAnonKey) state.lastCloudAction = 'Fill in config.js to enable cloud sync';
+    else state.lastCloudAction = 'Supabase client library did not load';
+  }
+  syncCloudUi();
+}
+
+function syncCloudUi() {
+  els.cloudTableText.textContent = config.cloudTable || 'underwriter_contracts';
+  els.lastCloudAction.textContent = state.lastCloudAction;
+
+  if (state.cloudReady) {
+    els.cloudStatusBadge.textContent = 'Cloud: ready';
+    els.cloudStatusBadge.className = 'cloud-pill cloud-ready';
+    els.cloudModeText.textContent = 'Supabase shared database';
+    els.cloudWorkspace.textContent = `Workspace: ${config.workspaceKey}`;
+  } else {
+    els.cloudStatusBadge.textContent = 'Cloud: local only';
+    els.cloudStatusBadge.className = 'cloud-pill cloud-local';
+    els.cloudModeText.textContent = 'Local browser only';
+    els.cloudWorkspace.textContent = 'Workspace: local only';
+  }
+}
+
+async function pullFromCloud() {
+  if (!state.cloudReady || !state.cloudClient) {
+    state.lastCloudAction = 'Cloud pull blocked: finish config.js first';
+    syncCloudUi();
+    setStatus(state.lastCloudAction);
+    return;
+  }
+
+  setStatus('Pulling records from Supabase...');
+  try {
+    const { data, error } = await state.cloudClient
+      .from(config.cloudTable)
+      .select('*')
+      .eq('workspace_key', config.workspaceKey)
+      .order('updated_at', { ascending: false });
+    if (error) throw error;
+
+    state.records = (data || []).map(cloudRowToRecord).map(sanitizeRecord);
+    state.selectedId = state.records[0]?.id || null;
+    recalcFlags();
+    persist();
+    renderAll();
+
+    state.lastCloudAction = `Pulled ${state.records.length} record(s) from cloud`;
+    syncCloudUi();
+    setStatus(state.lastCloudAction);
+  } catch (error) {
+    console.error(error);
+    state.lastCloudAction = `Cloud pull failed: ${error.message || error}`;
+    syncCloudUi();
+    setStatus(state.lastCloudAction);
+  }
+}
+
+async function pushAllToCloud() {
+  if (!state.cloudReady || !state.cloudClient) {
+    state.lastCloudAction = 'Cloud push blocked: finish config.js first';
+    syncCloudUi();
+    setStatus(state.lastCloudAction);
+    return;
+  }
+
+  setStatus(`Pushing ${state.records.length} record(s) to Supabase...`);
+  try {
+    const payload = state.records.map(recordToCloudRow);
+    const chunkSize = 200;
+    for (let i = 0; i < payload.length; i += chunkSize) {
+      const chunk = payload.slice(i, i + chunkSize);
+      const { error } = await state.cloudClient
+        .from(config.cloudTable)
+        .upsert(chunk, { onConflict: 'id' });
+      if (error) throw error;
+    }
+
+    state.lastCloudAction = `Pushed ${state.records.length} record(s) to cloud`;
+    syncCloudUi();
+    setStatus(state.lastCloudAction);
+  } catch (error) {
+    console.error(error);
+    state.lastCloudAction = `Cloud push failed: ${error.message || error}`;
+    syncCloudUi();
+    setStatus(state.lastCloudAction);
+  }
+}
+
+function recordToCloudRow(record) {
+  return {
+    id: record.id,
+    workspace_key: config.workspaceKey,
+    underwriter_name: record.underwriterName || null,
+    contract_type: record.contractType || null,
+    program_name: record.programName || null,
+    placement_detail: record.placementDetail || null,
+    contact_person: record.contactPerson || null,
+    email: record.email || null,
+    phone: record.phone || null,
+    start_date: record.startDate || null,
+    end_date: record.endDate || null,
+    amount: record.amount === '' ? null : Number(record.amount || 0),
+    credit_count: record.creditCount === '' ? null : Number(record.creditCount || 0),
+    program_count: record.programCount === '' ? null : Number(record.programCount || 0),
+    credit_copy: record.creditCopy || null,
+    credit_runs: record.creditRuns || null,
+    notes: record.notes || null,
+    raw_text: record.rawText || null,
+    source_file_name: record.sourceFileName || null,
+    source_hash: record.sourceHash || null,
+    imported_at: record.importedAt || new Date().toISOString(),
+    issue_summary: record.issueSummary || null,
+    issues_json: record.issues || [],
+  };
+}
+
+function cloudRowToRecord(row) {
+  return sanitizeRecord({
+    id: row.id || crypto.randomUUID(),
+    underwriterName: row.underwriter_name || '',
+    contractType: row.contract_type || '',
+    programName: row.program_name || '',
+    placementDetail: row.placement_detail || '',
+    contactPerson: row.contact_person || '',
+    email: row.email || '',
+    phone: row.phone || '',
+    startDate: row.start_date || '',
+    endDate: row.end_date || '',
+    amount: row.amount === null || row.amount === undefined ? '' : String(row.amount),
+    creditCount: row.credit_count === null || row.credit_count === undefined ? '' : String(row.credit_count),
+    programCount: row.program_count === null || row.program_count === undefined ? '' : String(row.program_count),
+    creditCopy: row.credit_copy || '',
+    creditRuns: row.credit_runs || '',
+    notes: row.notes || '',
+    rawText: row.raw_text || '',
+    sourceFileName: row.source_file_name || '',
+    sourceHash: row.source_hash || '',
+    importedAt: row.imported_at || new Date().toISOString(),
+    issues: Array.isArray(row.issues_json) ? row.issues_json : [],
+    issueSummary: row.issue_summary || '',
   });
 }
 
@@ -498,21 +674,15 @@ function upsertRecord(record) {
 
 function recalcFlags() {
   const quarterRange = getQuarterRange();
-  const records = state.records.map(sanitizeRecord);
+  const records = state.records.map((item) => sanitizeRecord({ ...item, issues: [], issueSummary: '' }));
 
-  for (const record of records) {
-    record.issues = [];
-    if (!record.underwriterName) record.issues.push({ type: 'warn', code: 'missing_name', label: 'Missing name' });
-    if (!record.startDate || !record.endDate) record.issues.push({ type: 'warn', code: 'missing_dates', label: 'Missing date(s)' });
-    if (record.startDate && record.endDate && record.startDate > record.endDate) {
-      record.issues.push({ type: 'bad', code: 'bad_range', label: 'Start after end' });
-    }
-    if (!record.placementDetail) record.issues.push({ type: 'warn', code: 'missing_placement', label: 'Missing placement' });
-    if (!record.creditRuns) record.issues.push({ type: 'warn', code: 'missing_runs', label: 'Missing exact runs' });
-    if (activeInQuarter(record, quarterRange.start, quarterRange.end)) {
-      record.issues.push({ type: 'ok', code: 'in_quarter', label: 'In quarter' });
-    }
-  }
+  records.forEach((record) => {
+    if (!record.underwriterName) record.issues.push({ type: 'warn', code: 'missing_name', label: 'Missing underwriter' });
+    if (!record.startDate || !record.endDate) record.issues.push({ type: 'warn', code: 'missing_dates', label: 'Missing start/end' });
+    if (!record.amount) record.issues.push({ type: 'warn', code: 'missing_amount', label: 'Missing amount' });
+    if (activeInQuarter(record, quarterRange.start, quarterRange.end)) record.issues.push({ type: 'ok', code: 'in_quarter', label: 'Active in quarter' });
+    if (activeInQuarter(record, quarterRange.start, quarterRange.end) && !record.creditRuns) record.issues.push({ type: 'warn', code: 'missing_runs', label: 'Missing exact credit runs' });
+  });
 
   for (let i = 0; i < records.length; i += 1) {
     for (let j = i + 1; j < records.length; j += 1) {
@@ -616,9 +786,8 @@ function flagScore(record) {
 }
 
 function toggleSort(key) {
-  if (state.sortKey === key) {
-    state.sortDir = state.sortDir === 'asc' ? 'desc' : 'asc';
-  } else {
+  if (state.sortKey === key) state.sortDir = state.sortDir === 'asc' ? 'desc' : 'asc';
+  else {
     state.sortKey = key;
     state.sortDir = key === 'amount' ? 'desc' : 'asc';
   }
@@ -634,11 +803,16 @@ function renderAll() {
   renderMetrics();
   renderNarrative();
   syncModal();
+  syncCloudUi();
 }
 
 function renderTabs() {
   els.tabButtons.forEach((button) => button.classList.toggle('active', button.dataset.tab === state.currentTab));
-  els.tabPanels.forEach((panel) => panel.classList.toggle('active', panel.id === `tab-${state.currentTab}`));
+  els.tabPanels.forEach((panel) => {
+    const active = panel.id === `tab-${state.currentTab}`;
+    panel.classList.toggle('active', active);
+    panel.hidden = !active;
+  });
 }
 
 function renderSortButtons() {
@@ -653,6 +827,7 @@ function renderSortButtons() {
 function renderContractsTable() {
   const rows = getSortedRecords(getFilteredRecords());
   els.contractsBody.innerHTML = '';
+  els.contractsCountText.textContent = `${rows.length} visible / ${state.records.length} total`;
 
   if (!rows.length) {
     els.contractsBody.innerHTML = '<tr><td colspan="9" class="muted">No matching records.</td></tr>';
@@ -752,7 +927,7 @@ function renderNarrative() {
         `${record.startDate || '??'} to ${record.endDate || '??'}`,
         formatMoney(record.amount),
         record.placementDetail || record.programName || 'Placement blank',
-        record.creditRuns ? `Runs entered` : `Runs still blank`,
+        record.creditRuns ? 'Runs entered' : 'Runs still blank',
       ];
       return `- ${parts.join(' | ')}`;
     }),
@@ -792,7 +967,8 @@ function syncModal() {
   }
 }
 
-function saveFormToSelected() {
+function saveFormToSelected(event) {
+  event?.preventDefault();
   const record = state.records.find((item) => item.id === state.selectedId);
   if (!record) return;
   for (const element of els.recordForm.elements) {
@@ -806,7 +982,8 @@ function saveFormToSelected() {
   setStatus(`Saved ${record.underwriterName || record.sourceFileName || 'record'}.`);
 }
 
-function duplicateSelected() {
+function duplicateSelected(event) {
+  event?.preventDefault();
   const record = state.records.find((item) => item.id === state.selectedId);
   if (!record) return;
   const clone = sanitizeRecord({
@@ -824,11 +1001,11 @@ function duplicateSelected() {
   setStatus('Record duplicated.');
 }
 
-function deleteSelected() {
+function deleteSelected(event) {
+  event?.preventDefault();
   const record = state.records.find((item) => item.id === state.selectedId);
   if (!record) return;
-  const ok = confirm(`Delete ${record.underwriterName || record.sourceFileName || 'this record'}?`);
-  if (!ok) return;
+  if (!confirm(`Delete ${record.underwriterName || record.sourceFileName || 'this record'}?`)) return;
   state.records = state.records.filter((item) => item.id !== state.selectedId);
   state.selectedId = state.records[0]?.id || null;
   recalcFlags();
@@ -836,11 +1013,11 @@ function deleteSelected() {
   renderAll();
   syncModal();
   if (!state.selectedId) closeModal();
+  setStatus('Record deleted.');
 }
 
 function clearAllRecords() {
-  const ok = confirm('Clear the local database? This wipes records stored in this browser.');
-  if (!ok) return;
+  if (!confirm('Clear the local database? This wipes records stored in this browser.')) return;
   state.records = [];
   state.selectedId = null;
   persist();
@@ -852,22 +1029,8 @@ function clearAllRecords() {
 function exportQuarterCsv() {
   const quarter = getQuarterRange();
   const rows = getSortedRecords(state.records.filter((record) => activeInQuarter(record, quarter.start, quarter.end)));
-  const columns = [
-    'underwriterName',
-    'startDate',
-    'endDate',
-    'issueSummary',
-    'contractType',
-    'placementDetail',
-    'amount',
-    'sourceFileName',
-    'creditRuns',
-    'notes',
-  ];
-  const csv = [
-    columns.join(','),
-    ...rows.map((record) => columns.map((key) => csvEscape(record[key] ?? '')).join(',')),
-  ].join('\n');
+  const columns = ['underwriterName', 'startDate', 'endDate', 'issueSummary', 'contractType', 'placementDetail', 'amount', 'sourceFileName', 'creditRuns', 'notes'];
+  const csv = [columns.join(','), ...rows.map((record) => columns.map((key) => csvEscape(record[key] ?? '')).join(','))].join('\n');
   downloadFile(`wnmu-quarterly-underwriters-${quarter.start}-to-${quarter.end}.csv`, csv, 'text/csv;charset=utf-8');
 }
 

@@ -1,47 +1,61 @@
-# WNMU Underwriter Intake v0.2.0
+# WNMU Underwriter Intake v0.3.1
 
-This is a local-first browser app for ingesting underwriting contracts, reviewing them, and preparing quarterly reporting data.
+This pass fixes the fake-tab behavior, tightens the quarterly layout, and adds quick Supabase sync.
 
-## What changed in this pass
+## What changed
 
-- Split into **3 top sections**:
-  - **Ingest**
-  - **Contracts**
-  - **Quarterly**
-- Contract grid columns reordered to:
-  - **Underwriter**
-  - **Start**
-  - **End**
-  - **Flags**
-  - **Type**
-  - **Program / Day / Day-part**
-  - **Amount**
-  - **Source**
-- Added **sortable column headers** with ascending / descending toggle
-- Added **popup editor modal** triggered by the **Open** button
-- Added blank editable field for **Program / Day / Day-part**
-- Added blank editable field for **Exact credit run dates / times**
-- Overlap logic only flags contracts that overlap for the **same underwriter**, not different ones
-- Quarterly CSV export now includes placement and exact run schedule fields
+- Real top-level sections: **Ingest / Contracts / Quarterly**
+- Inactive sections are actually hidden instead of living on one endless page
+- Contracts list sorts from the header arrows
+- Contract columns are in this order:
+  - Underwriter
+  - Start
+  - End
+  - Flags
+  - Type
+  - Program / Day / Day-part
+  - Amount
+  - Source
+- **Open** launches a modal popup editor
+- Added editable field for **Program / Day / Day-part**
+- Added editable field for **Exact credit run dates / times**
+- Quarterly grid wraps better and avoids the ridiculous side-scroll problem
+- Supabase **Pull from cloud** and **Push all to cloud**
+- Local browser storage still works if cloud is not configured yet
 
 ## Files
 
-- `index.html`
-- `app.css`
-- `app.js`
+- `index.html` - app shell
+- `app.css` - styling
+- `app.js` - app logic, parsing, duplicate checks, quarterly report, cloud sync
+- `config.js` - fill this in with your Supabase values
+- `supabase-schema.sql` - run this in Supabase SQL editor
 
-## How to run
+## Quick Supabase setup
 
-Open `index.html` in a modern browser.
+1. Run `supabase-schema.sql` in your Supabase project.
+2. Open `config.js`.
+3. Change these values:
+   - `enableSupabase: true`
+   - `supabaseUrl`
+   - `supabaseAnonKey`
+   - `workspaceKey` (leave `wnmu-underwriters` unless you want a different shared set)
+4. Open `index.html`.
+5. Use **Push all to cloud** once to move your local records up.
+6. On another machine, use the same `config.js`, open the app, and hit **Pull from cloud**.
 
-## Supported import types
+## Important note
 
-- PDF
-- DOCX
-- JSON backup from this app
+This is intentionally a quick shared-browser setup. The included SQL policy allows browser access with the anon key, which is fast but not hardened. If you want, the next pass can move this to real auth and tighter RLS.
 
-## Notes
+## Import behavior
 
-- Scanned PDFs use browser OCR and can be slower.
-- DOCX import uses Mammoth in-browser text extraction.
-- This pass is still **local-first**. It is structured so a later Supabase-backed version can reuse the record shape instead of starting over.
+- PDF: tries text layer first, then OCR fallback for scanned contracts
+- DOCX: extracts text automatically
+- JSON backup: imports previously exported app data
+
+## Known limits in this pass
+
+- PDF OCR can be slow on big scans
+- Exact credit run dates / times are still manual entry for now
+- Program / day / day-part parsing is best-effort, not psychic
