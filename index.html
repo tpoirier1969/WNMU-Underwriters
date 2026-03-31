@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WNMU Underwriter Intake</title>
+  <link rel="stylesheet" href="app.css" />
+  <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@5.6.205/build/pdf.min.mjs" type="module"></script>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <script src="https://unpkg.com/mammoth@1.8.0/mammoth.browser.min.js"></script>
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <div>
+        <h1>WNMU Underwriter Intake</h1>
+        <p class="subtitle">Local-first contract intake, auto-extraction, duplicate checks, and Q1 2026 reporting</p>
+      </div>
+      <div class="version-pill">v0.1.0</div>
+    </header>
+
+    <section class="grid hero-grid">
+      <div class="card uploader-card">
+        <div class="card-title-row">
+          <h2>Import contracts</h2>
+          <span class="helper-text">PDF and DOCX</span>
+        </div>
+        <div id="dropZone" class="drop-zone" tabindex="0">
+          <div class="drop-big">Drop files here</div>
+          <div>or</div>
+          <label class="button button-primary" for="fileInput">Choose files</label>
+          <input id="fileInput" type="file" accept=".pdf,.doc,.docx" multiple hidden />
+          <p class="small-note">
+            Text PDFs are fast. Scanned PDFs use browser OCR and can be slower. Manual correction stays available either way.
+          </p>
+        </div>
+        <div class="button-row wrap">
+          <button id="manualAddBtn" class="button">Add manual record</button>
+          <button id="importJsonBtn" class="button">Import JSON backup</button>
+          <input id="importJsonInput" type="file" accept=".json" hidden />
+          <button id="exportJsonBtn" class="button">Export JSON backup</button>
+          <button id="clearAllBtn" class="button button-danger">Clear local database</button>
+        </div>
+        <div id="importStatus" class="status-box muted">No imports running.</div>
+      </div>
+
+      <div class="card summary-card">
+        <h2>Quarter snapshot</h2>
+        <div class="metrics" id="metrics"></div>
+        <div class="quarter-controls">
+          <label>
+            Quarter start
+            <input id="quarterStart" type="date" value="2026-01-01" />
+          </label>
+          <label>
+            Quarter end
+            <input id="quarterEnd" type="date" value="2026-03-31" />
+          </label>
+        </div>
+        <div class="button-row wrap">
+          <button id="exportQuarterCsvBtn" class="button button-primary">Export quarterly CSV</button>
+          <button id="copyNarrativeBtn" class="button">Copy quarterly narrative</button>
+        </div>
+        <textarea id="narrativeBox" class="narrative-box" readonly></textarea>
+      </div>
+    </section>
+
+    <section class="grid main-grid">
+      <div class="card records-card">
+        <div class="card-title-row sticky-controls">
+          <h2>Contracts</h2>
+          <div class="button-row wrap compact">
+            <input id="searchInput" class="search-input" type="search" placeholder="Search underwriter, email, notes, contract type..." />
+            <select id="issueFilter">
+              <option value="all">All records</option>
+              <option value="issue">Only flagged records</option>
+              <option value="duplicate">Duplicate candidates</option>
+              <option value="overlap">Same-underwriter overlaps</option>
+              <option value="quarter">Active in quarter</option>
+            </select>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Underwriter</th>
+                <th>Type</th>
+                <th>Start</th>
+                <th>End</th>
+                <th>Amount</th>
+                <th>Flags</th>
+                <th>Source</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="recordsBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card detail-card">
+        <div class="card-title-row">
+          <h2>Selected record</h2>
+          <span id="detailBadge" class="helper-text">Nothing selected</span>
+        </div>
+        <form id="recordForm" class="form-grid">
+          <label>
+            Underwriter / sponsor
+            <input name="underwriterName" type="text" />
+          </label>
+          <label>
+            Contract type
+            <input name="contractType" type="text" />
+          </label>
+          <label>
+            Program / campaign
+            <input name="programName" type="text" />
+          </label>
+          <label>
+            Contact person
+            <input name="contactPerson" type="text" />
+          </label>
+          <label>
+            Email
+            <input name="email" type="email" />
+          </label>
+          <label>
+            Phone
+            <input name="phone" type="text" />
+          </label>
+          <label>
+            Start date
+            <input name="startDate" type="date" />
+          </label>
+          <label>
+            End date
+            <input name="endDate" type="date" />
+          </label>
+          <label>
+            Amount
+            <input name="amount" type="number" step="0.01" min="0" />
+          </label>
+          <label>
+            Credits / spots
+            <input name="creditCount" type="number" step="1" min="0" />
+          </label>
+          <label>
+            Program count
+            <input name="programCount" type="number" step="1" min="0" />
+          </label>
+          <label>
+            Source file
+            <input name="sourceFileName" type="text" readonly />
+          </label>
+          <label class="full-width">
+            Audio credit copy
+            <textarea name="creditCopy"></textarea>
+          </label>
+          <label class="full-width">
+            Internal notes
+            <textarea name="notes"></textarea>
+          </label>
+          <label class="full-width">
+            Raw extracted text
+            <textarea name="rawText" class="raw-text"></textarea>
+          </label>
+        </form>
+        <div class="button-row wrap">
+          <button id="saveRecordBtn" class="button button-primary">Save changes</button>
+          <button id="duplicateRecordBtn" class="button">Duplicate</button>
+          <button id="deleteRecordBtn" class="button button-danger">Delete</button>
+        </div>
+        <div id="recordIssues" class="issues-box muted">No record selected.</div>
+      </div>
+    </section>
+  </div>
+
+  <template id="rowTemplate">
+    <tr>
+      <td class="row-underwriter"></td>
+      <td class="row-type"></td>
+      <td class="row-start"></td>
+      <td class="row-end"></td>
+      <td class="row-amount"></td>
+      <td class="row-flags"></td>
+      <td class="row-source"></td>
+      <td><button class="button small row-open">Open</button></td>
+    </tr>
+  </template>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
