@@ -1,52 +1,43 @@
-# WNMU Underwriter Intake v0.3.1
+# WNMU Underwriter Intake v0.4.0
 
-This pass fixes the fake-tab behavior, tightens the quarterly layout, and adds quick Supabase sync.
+This pass cleans up the Supabase side so the app behaves better inside a shared Supabase project instead of living in a generic public-table junk drawer.
 
 ## What changed
 
-- Real top-level sections: **Ingest / Contracts / Quarterly**
-- Inactive sections are actually hidden instead of living on one endless page
-- Contracts list sorts from the header arrows
-- Contract columns are in this order:
-  - Underwriter
-  - Start
-  - End
-  - Flags
-  - Type
-  - Program / Day / Day-part
-  - Amount
-  - Source
-- **Open** launches a modal popup editor
-- Added editable field for **Program / Day / Day-part**
-- Added editable field for **Exact credit run dates / times**
-- Quarterly grid wraps better and avoids the ridiculous side-scroll problem
-- Supabase **Pull from cloud** and **Push all to cloud**
-- Local browser storage still works if cloud is not configured yet
+- Keeps the three real sections: **Ingest / Contracts / Quarterly**
+- Moves the cloud setup to a **namespaced custom schema**: `wnmu_underwriters`
+- Uses a dedicated contracts table: `wnmu_underwriter_contracts`
+- Pre-creates a future detail table for exact run timestamps: `wnmu_underwriter_credit_runs`
+- Uses namespaced trigger/function/policy names instead of generic shared-instance names
+- Keeps the existing browser-first workflow and local fallback
+- Auto-upgrades legacy config defaults if your old config still says `underwriter_contracts`
 
-## Files
+## Files in this zip
 
 - `index.html` - app shell
 - `app.css` - styling
 - `app.js` - app logic, parsing, duplicate checks, quarterly report, cloud sync
-- `config.js` - fill this in with your Supabase values
+- `README.md` - setup notes
 - `supabase-schema.sql` - run this in Supabase SQL editor
 
-## Quick Supabase setup
+## Supabase setup for this pass
 
-1. Run `supabase-schema.sql` in your Supabase project.
-2. Open `config.js`.
-3. Change these values:
+1. In **Supabase > API Settings > Exposed schemas**, add: `wnmu_underwriters`
+2. Run `supabase-schema.sql` in the SQL editor.
+3. Keep your existing `config.js` file and change only these lines if needed:
    - `enableSupabase: true`
-   - `supabaseUrl`
-   - `supabaseAnonKey`
-   - `workspaceKey` (leave `wnmu-underwriters` unless you want a different shared set)
-4. Open `index.html`.
-5. Use **Push all to cloud** once to move your local records up.
-6. On another machine, use the same `config.js`, open the app, and hit **Pull from cloud**.
+   - `workspaceKey: 'wnmu-underwriters'`
+   - `cloudSchema: 'wnmu_underwriters'`
+   - `cloudTable: 'wnmu_underwriter_contracts'`
+   - `cloudRunsTable: 'wnmu_underwriter_credit_runs'`
+4. Open the app and use **Push all to cloud**.
+5. On another machine, use the same config and **Pull from cloud**.
 
-## Important note
+## Important truth, not brochure copy
 
-This is intentionally a quick shared-browser setup. The included SQL policy allows browser access with the anon key, which is fast but not hardened. If you want, the next pass can move this to real auth and tighter RLS.
+This is **better isolated**, not fully private.
+
+It now sits in its own schema and uses explicitly named objects, which is the right move for a shared Supabase project. But because the browser build still uses anon-key client access, this is not the final hardening step. Real privacy later means tighter RLS and/or auth.
 
 ## Import behavior
 
@@ -57,5 +48,5 @@ This is intentionally a quick shared-browser setup. The included SQL policy allo
 ## Known limits in this pass
 
 - PDF OCR can be slow on big scans
-- Exact credit run dates / times are still manual entry for now
-- Program / day / day-part parsing is best-effort, not psychic
+- Exact credit run dates / times are still mainly manual entry for now
+- The future `wnmu_underwriter_credit_runs` table is created now so we can wire detailed run records cleanly in a later pass

@@ -19,7 +19,7 @@
         <p class="subtitle">Contract intake, dedupe review, overlap checks, and quarterly prep</p>
       </div>
       <div class="topbar-right">
-        <div class="version-pill">v0.3.1</div>
+        <div class="version-pill">v0.4.0</div>
         <div id="cloudStatusBadge" class="cloud-pill cloud-local">Cloud: local only</div>
       </div>
     </header>
@@ -66,14 +66,16 @@
               </div>
               <div class="info-list compact">
                 <div class="info-item"><strong>Storage mode:</strong> <span id="cloudModeText">Local browser only</span></div>
-                <div class="info-item"><strong>Table:</strong> <span id="cloudTableText">underwriter_contracts</span></div>
+                <div class="info-item"><strong>Schema:</strong> <span id="cloudSchemaText">wnmu_underwriters</span></div>
+                <div class="info-item"><strong>Contracts table:</strong> <span id="cloudTableText">wnmu_underwriter_contracts</span></div>
+                <div class="info-item"><strong>Future runs table:</strong> <span id="cloudRunsTableText">wnmu_underwriter_credit_runs</span></div>
                 <div class="info-item"><strong>Last cloud action:</strong> <span id="lastCloudAction">None yet</span></div>
               </div>
               <div class="button-row wrap top-gap">
                 <button id="pullCloudBtn" type="button" class="button">Pull from cloud</button>
                 <button id="pushCloudBtn" type="button" class="button button-primary">Push all to cloud</button>
               </div>
-              <p class="small-note top-gap">This pass is set up for a quick shared-client Supabase workflow. It is practical, not security-beautiful.</p>
+              <p class="small-note top-gap">This pass is namespaced for a shared Supabase project. It is cleaner and safer for coexistence, but still not the final privacy-hardening pass.</p>
             </div>
 
             <div class="card">

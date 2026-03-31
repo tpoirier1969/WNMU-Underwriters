@@ -1,5 +1,5 @@
-const CURRENT_STORAGE_KEY = 'wnmu-underwriter-intake-v0.3.1';
-const LEGACY_STORAGE_KEYS = ['wnmu-underwriter-intake-v0.2.0', 'wnmu-underwriter-intake-v0.1.0'];
+const CURRENT_STORAGE_KEY = 'wnmu-underwriter-intake-v0.4.0';
+const LEGACY_STORAGE_KEYS = ['wnmu-underwriter-intake-v0.3.1', 'wnmu-underwriter-intake-v0.2.0', 'wnmu-underwriter-intake-v0.1.0'];
 const OCR_PAGE_LIMIT = 4;
 
 const DEFAULT_CONFIG = {
@@ -7,10 +7,20 @@ const DEFAULT_CONFIG = {
   supabaseUrl: '',
   supabaseAnonKey: '',
   workspaceKey: 'wnmu-underwriters',
-  cloudTable: 'underwriter_contracts',
+  cloudSchema: 'wnmu_underwriters',
+  cloudTable: 'wnmu_underwriter_contracts',
+  cloudRunsTable: 'wnmu_underwriter_credit_runs',
 };
 
-const config = { ...DEFAULT_CONFIG, ...(window.WNMU_UNDERWRITER_CONFIG || {}) };
+function normalizeConfig(rawConfig = {}) {
+  const merged = { ...DEFAULT_CONFIG, ...rawConfig };
+  if (!rawConfig.cloudSchema) merged.cloudSchema = DEFAULT_CONFIG.cloudSchema;
+  if (!rawConfig.cloudTable || rawConfig.cloudTable === 'underwriter_contracts') merged.cloudTable = DEFAULT_CONFIG.cloudTable;
+  if (!rawConfig.cloudRunsTable) merged.cloudRunsTable = DEFAULT_CONFIG.cloudRunsTable;
+  return merged;
+}
+
+const config = normalizeConfig(window.WNMU_UNDERWRITER_CONFIG || {});
 
 const state = {
   records: [],
@@ -50,7 +60,9 @@ const els = {
   cloudStatusBadge: document.getElementById('cloudStatusBadge'),
   cloudModeText: document.getElementById('cloudModeText'),
   cloudWorkspace: document.getElementById('cloudWorkspace'),
+  cloudSchemaText: document.getElementById('cloudSchemaText'),
   cloudTableText: document.getElementById('cloudTableText'),
+  cloudRunsTableText: document.getElementById('cloudRunsTableText'),
   lastCloudAction: document.getElementById('lastCloudAction'),
   pullCloudBtn: document.getElementById('pullCloudBtn'),
   pushCloudBtn: document.getElementById('pushCloudBtn'),
@@ -164,13 +176,13 @@ function initCloudClient() {
   );
 
   if (canEnable) {
-    state.cloudClient = window.supabase.createClient(config.supabaseUrl, config.supabaseAnonKey);
+    state.cloudClient = window.supabase.createClient(config.supabaseUrl, config.supabaseAnonKey, { db: { schema: config.cloudSchema } });
     state.cloudReady = true;
     state.lastCloudAction = 'Cloud ready';
   } else {
     state.cloudClient = null;
     state.cloudReady = false;
-    if (!config.enableSupabase) state.lastCloudAction = 'Cloud disabled in config.js';
+    if (!config.enableSupabase) state.lastCloudAction = 'Cloud disabled in config.js or local defaults';
     else if (!config.supabaseUrl || !config.supabaseAnonKey) state.lastCloudAction = 'Fill in config.js to enable cloud sync';
     else state.lastCloudAction = 'Supabase client library did not load';
   }
@@ -178,7 +190,9 @@ function initCloudClient() {
 }
 
 function syncCloudUi() {
-  els.cloudTableText.textContent = config.cloudTable || 'underwriter_contracts';
+  els.cloudSchemaText.textContent = config.cloudSchema || 'wnmu_underwriters';
+  els.cloudTableText.textContent = config.cloudTable || 'wnmu_underwriter_contracts';
+  els.cloudRunsTableText.textContent = config.cloudRunsTable || 'wnmu_underwriter_credit_runs';
   els.lastCloudAction.textContent = state.lastCloudAction;
 
   if (state.cloudReady) {
@@ -217,7 +231,7 @@ async function pullFromCloud() {
     persist();
     renderAll();
 
-    state.lastCloudAction = `Pulled ${state.records.length} record(s) from cloud`;
+    state.lastCloudAction = `Pulled ${state.records.length} contract record(s) from cloud`; 
     syncCloudUi();
     setStatus(state.lastCloudAction);
   } catch (error) {
@@ -244,11 +258,11 @@ async function pushAllToCloud() {
       const chunk = payload.slice(i, i + chunkSize);
       const { error } = await state.cloudClient
         .from(config.cloudTable)
-        .upsert(chunk, { onConflict: 'id' });
+        .upsert(chunk, { onConflict: 'id', ignoreDuplicates: false });
       if (error) throw error;
     }
 
-    state.lastCloudAction = `Pushed ${state.records.length} record(s) to cloud`;
+    state.lastCloudAction = `Pushed ${state.records.length} contract record(s) to cloud`; 
     syncCloudUi();
     setStatus(state.lastCloudAction);
   } catch (error) {
