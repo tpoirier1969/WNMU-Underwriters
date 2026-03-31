@@ -560,12 +560,12 @@ textarea {
 .compact-form-grid .field-contact { grid-column: span 3; }
 .compact-form-grid .field-email { grid-column: span 5; }
 .compact-form-grid .field-phone { grid-column: span 4; }
-.compact-form-grid .field-flags { grid-column: span 2; }
-.compact-form-grid .field-program-clue { grid-column: span 4; }
-.compact-form-grid .field-notes { grid-column: span 6; }
-.compact-form-grid .field-credit-runs { grid-column: span 3; }
-.compact-form-grid .field-credit-copy { grid-column: span 3; }
-.compact-form-grid .field-raw-text { grid-column: span 6; }
+.compact-form-grid .field-flags { grid-column: span 1; }
+.compact-form-grid .field-program-clue { grid-column: span 3; }
+.compact-form-grid .field-notes { grid-column: span 8; }
+.compact-form-grid .field-credit-runs { grid-column: span 2; }
+.compact-form-grid .field-credit-copy { grid-column: span 2; }
+.compact-form-grid .field-raw-text { grid-column: span 8; }
 .full-width {
   grid-column: 1 / -1;
 }
@@ -575,17 +575,29 @@ textarea {
   line-height: 1.2;
 }
 .compact-area {
-  min-height: 68px;
+  min-height: 64px;
   line-height: 1.2;
 }
 .compact-area-small {
   min-height: 56px;
 }
 .notes-area {
-  min-height: 56px;
+  min-height: 72px;
+}
+.field-flags-short input {
+  max-width: 100%;
+}
+.field-program-clue-wide input {
+  max-width: 100%;
+}
+.field-credit-copy {
+  gap: 2px;
+}
+.field-credit-copy textarea {
+  min-height: 82px;
 }
 .raw-text-large {
-  min-height: 182px;
+  min-height: 232px;
 }
 .modal-actions {
   position: sticky;
