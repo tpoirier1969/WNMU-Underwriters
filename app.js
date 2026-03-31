@@ -1,28 +1,38 @@
-const STORAGE_KEY = 'wnmu-underwriter-intake-v0.1.0';
+const CURRENT_STORAGE_KEY = 'wnmu-underwriter-intake-v0.2.0';
+const LEGACY_STORAGE_KEYS = ['wnmu-underwriter-intake-v0.1.0'];
 const OCR_PAGE_LIMIT = 4;
 
 const state = {
   records: [],
   selectedId: null,
+  currentTab: 'ingest',
+  sortKey: 'underwriterName',
+  sortDir: 'asc',
   importQueueActive: false,
 };
 
 const els = {
+  tabButtons: [...document.querySelectorAll('.tab-button')],
+  tabPanels: [...document.querySelectorAll('.tab-panel')],
   dropZone: document.getElementById('dropZone'),
   fileInput: document.getElementById('fileInput'),
   importStatus: document.getElementById('importStatus'),
-  recordsBody: document.getElementById('recordsBody'),
-  recordForm: document.getElementById('recordForm'),
-  detailBadge: document.getElementById('detailBadge'),
-  recordIssues: document.getElementById('recordIssues'),
   searchInput: document.getElementById('searchInput'),
   issueFilter: document.getElementById('issueFilter'),
-  metrics: document.getElementById('metrics'),
   quarterStart: document.getElementById('quarterStart'),
   quarterEnd: document.getElementById('quarterEnd'),
+  metrics: document.getElementById('metrics'),
   narrativeBox: document.getElementById('narrativeBox'),
-  rowTemplate: document.getElementById('rowTemplate'),
+  contractsBody: document.getElementById('contractsBody'),
+  quarterlyBody: document.getElementById('quarterlyBody'),
+  quarterSummaryBadge: document.getElementById('quarterSummaryBadge'),
+  contractRowTemplate: document.getElementById('contractRowTemplate'),
+  recordModal: document.getElementById('recordModal'),
+  recordForm: document.getElementById('recordForm'),
+  modalSubhead: document.getElementById('modalSubhead'),
+  closeModalBtn: document.getElementById('closeModalBtn'),
   importJsonInput: document.getElementById('importJsonInput'),
+  sortButtons: [...document.querySelectorAll('.sort-button')],
 };
 
 boot();
@@ -35,6 +45,13 @@ function boot() {
 }
 
 function bindEvents() {
+  els.tabButtons.forEach((button) => {
+    button.addEventListener('click', () => {
+      state.currentTab = button.dataset.tab;
+      renderTabs();
+    });
+  });
+
   els.fileInput.addEventListener('change', async (event) => {
     await importFiles([...event.target.files]);
     event.target.value = '';
@@ -75,18 +92,28 @@ function bindEvents() {
     persist();
     recalcFlags();
     renderAll();
+    openModal(record.id);
   });
 
-  document.getElementById('saveRecordBtn').addEventListener('click', () => saveFormToSelected());
-  document.getElementById('deleteRecordBtn').addEventListener('click', () => deleteSelected());
-  document.getElementById('duplicateRecordBtn').addEventListener('click', () => duplicateSelected());
+  document.getElementById('exportJsonBtn').addEventListener('click', exportJsonBackup);
+  document.getElementById('importJsonBtn').addEventListener('click', () => els.importJsonInput.click());
   document.getElementById('clearAllBtn').addEventListener('click', clearAllRecords);
   document.getElementById('exportQuarterCsvBtn').addEventListener('click', exportQuarterCsv);
   document.getElementById('copyNarrativeBtn').addEventListener('click', copyNarrative);
-  document.getElementById('exportJsonBtn').addEventListener('click', exportJsonBackup);
-  document.getElementById('importJsonBtn').addEventListener('click', () => els.importJsonInput.click());
-  els.importJsonInput.addEventListener('change', importJsonBackup);
+  document.getElementById('saveRecordBtn').addEventListener('click', (event) => {
+    event.preventDefault();
+    saveFormToSelected();
+  });
+  document.getElementById('duplicateRecordBtn').addEventListener('click', (event) => {
+    event.preventDefault();
+    duplicateSelected();
+  });
+  document.getElementById('deleteRecordBtn').addEventListener('click', (event) => {
+    event.preventDefault();
+    deleteSelected();
+  });
 
+  els.importJsonInput.addEventListener('change', importJsonBackup);
   [els.searchInput, els.issueFilter, els.quarterStart, els.quarterEnd].forEach((el) => {
     el.addEventListener('input', () => {
       recalcFlags();
@@ -97,56 +124,46 @@ function bindEvents() {
       renderAll();
     });
   });
-}
 
-function loadState() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return;
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed.records)) {
-      state.records = parsed.records.map(sanitizeRecord);
-      state.selectedId = parsed.selectedId || state.records[0]?.id || null;
-    }
-  } catch (error) {
-    console.error('Failed to load local state', error);
-  }
-}
+  els.sortButtons.forEach((button) => {
+    button.addEventListener('click', () => toggleSort(button.dataset.sort));
+  });
 
-function persist() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify({
-    records: state.records,
-    selectedId: state.selectedId,
-  }));
-}
-
-function makeBlankRecord() {
-  return sanitizeRecord({
-    id: crypto.randomUUID(),
-    underwriterName: '',
-    contractType: '',
-    programName: '',
-    contactPerson: '',
-    email: '',
-    phone: '',
-    startDate: '',
-    endDate: '',
-    amount: '',
-    creditCount: '',
-    programCount: '',
-    creditCopy: '',
-    notes: '',
-    rawText: '',
-    sourceFileName: 'Manual entry',
-    sourceHash: '',
-    importedAt: new Date().toISOString(),
-    issues: [],
+  els.closeModalBtn.addEventListener('click', closeModal);
+  els.recordModal.addEventListener('click', (event) => {
+    if (event.target.dataset.closeModal === 'true') closeModal();
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && !els.recordModal.classList.contains('hidden')) closeModal();
   });
 }
 
-function sanitizeRecord(record) {
-  const blank = makeTrulyBlank();
-  return { ...blank, ...record, issues: Array.isArray(record?.issues) ? record.issues : [] };
+function loadState() {
+  let loaded = false;
+  const keys = [CURRENT_STORAGE_KEY, ...LEGACY_STORAGE_KEYS];
+  for (const key of keys) {
+    const raw = localStorage.getItem(key);
+    if (!raw) continue;
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed.records)) {
+        state.records = parsed.records.map(sanitizeRecord);
+        state.selectedId = parsed.selectedId || state.records[0]?.id || null;
+        loaded = true;
+        break;
+      }
+    } catch (error) {
+      console.error('Failed to load local state', error);
+    }
+  }
+  if (loaded) persist();
+}
+
+function persist() {
+  localStorage.setItem(CURRENT_STORAGE_KEY, JSON.stringify({
+    records: state.records,
+    selectedId: state.selectedId,
+  }));
 }
 
 function makeTrulyBlank() {
@@ -155,6 +172,7 @@ function makeTrulyBlank() {
     underwriterName: '',
     contractType: '',
     programName: '',
+    placementDetail: '',
     contactPerson: '',
     email: '',
     phone: '',
@@ -164,25 +182,41 @@ function makeTrulyBlank() {
     creditCount: '',
     programCount: '',
     creditCopy: '',
+    creditRuns: '',
     notes: '',
     rawText: '',
     sourceFileName: '',
     sourceHash: '',
     importedAt: new Date().toISOString(),
     issues: [],
+    issueSummary: '',
   };
+}
+
+function makeBlankRecord() {
+  return sanitizeRecord({
+    ...makeTrulyBlank(),
+    sourceFileName: 'Manual entry',
+  });
+}
+
+function sanitizeRecord(record) {
+  const blank = makeTrulyBlank();
+  const merged = { ...blank, ...record, issues: Array.isArray(record?.issues) ? record.issues : [] };
+  merged.issueSummary = buildIssueSummary(merged.issues);
+  return merged;
 }
 
 async function importFiles(files) {
   if (!files.length) return;
   if (state.importQueueActive) {
-    setStatus('Import already running. Finish that first so the browser does not catch fire.');
+    setStatus('Import already running. Let that finish first.');
     return;
   }
   state.importQueueActive = true;
 
   try {
-    const accepted = files.filter((file) => /\.(pdf|docx?|json)$/i.test(file.name));
+    const accepted = files.filter((file) => /\.(pdf|docx|json)$/i.test(file.name));
     if (!accepted.length) {
       setStatus('No supported files found. Use PDF, DOCX, or JSON backup.');
       return;
@@ -195,13 +229,16 @@ async function importFiles(files) {
         await importJsonFile(file);
         continue;
       }
-      const record = await parseFileToRecord(file, i + 1, accepted.length);
+      const record = await parseFileToRecord(file);
       upsertRecord(record);
       state.selectedId = record.id;
       recalcFlags();
       renderAll();
       persist();
     }
+
+    state.currentTab = 'contracts';
+    renderTabs();
     setStatus(`Finished importing ${accepted.length} file(s).`);
   } catch (error) {
     console.error(error);
@@ -220,16 +257,13 @@ async function parseFileToRecord(file) {
   let rawText = '';
   let extractionPath = '';
 
-  if (/\.docx?$/i.test(file.name)) {
+  if (/\.docx$/i.test(file.name)) {
     rawText = await extractDocxText(bytes.buffer);
     extractionPath = 'DOCX text extraction';
   } else if (/\.pdf$/i.test(file.name)) {
     const pdfResult = await extractPdfText(bytes);
     rawText = pdfResult.text;
     extractionPath = pdfResult.path;
-  } else {
-    rawText = '';
-    extractionPath = 'Unsupported file type';
   }
 
   const parsed = parseContractText(rawText, file.name);
@@ -255,15 +289,13 @@ async function extractPdfText(bytes) {
 
   const loadingTask = pdfjsLib.getDocument({ data: bytes });
   const pdf = await loadingTask.promise;
-  let textParts = [];
+  const textParts = [];
 
   for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
     const page = await pdf.getPage(pageNumber);
     const textContent = await page.getTextContent();
     const pageText = textContent.items.map((item) => item.str).join(' ').trim();
-    if (pageText.length > 80) {
-      textParts.push(pageText);
-    }
+    if (pageText.length > 80) textParts.push(pageText);
   }
 
   const directText = normalizeText(textParts.join('\n\n'));
@@ -282,9 +314,7 @@ async function extractPdfText(bytes) {
     canvas.width = viewport.width;
     canvas.height = viewport.height;
     await page.render({ canvasContext: context, viewport }).promise;
-    const result = await Tesseract.recognize(canvas, 'eng', {
-      logger: () => {},
-    });
+    const result = await Tesseract.recognize(canvas, 'eng', { logger: () => {} });
     ocrParts.push(result.data?.text || '');
   }
 
@@ -295,7 +325,6 @@ function parseContractText(rawText, fileName = '') {
   const text = normalizeText(rawText);
   const lines = text.split('\n').map((line) => line.trim()).filter(Boolean);
   const lower = text.toLowerCase();
-
   const dates = extractDates(text).sort();
   const moneyValues = extractCurrency(text);
   const emails = uniqueMatches(text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) || []);
@@ -309,10 +338,10 @@ function parseContractText(rawText, fileName = '') {
 
   record.contractType = detectContractType(lower, lines, fileName);
   record.programName = findNamedField(text, [
-    /(?:program|series|campaign|show|special)\s*[:\-]\s*(.+)/i,
-    /(?:title of program|contract title)\s*[:\-]\s*(.+)/i,
+    /(?:program|series|campaign|show|special|title of program|contract title)\s*[:\-]\s*(.+)/i,
   ]) || guessProgramName(lines, lower);
 
+  record.placementDetail = findPlacementDetail(text, lines) || '';
   record.contactPerson = findNamedField(text, [
     /(?:contact person|contact|representative|sales rep|account executive)\s*[:\-]\s*(.+)/i,
   ]);
@@ -325,7 +354,6 @@ function parseContractText(rawText, fileName = '') {
   const explicitEnd = findNamedField(text, [
     /(?:end date|ends?|expiration date|contract end)\s*[:\-]\s*([A-Za-z]+\s+\d{1,2},\s*\d{4}|\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/i,
   ]);
-
   record.startDate = normalizeDate(explicitStart || dates[0] || '');
   record.endDate = normalizeDate(explicitEnd || dates[dates.length - 1] || '');
 
@@ -336,15 +364,11 @@ function parseContractText(rawText, fileName = '') {
 
   const amount = moneyValues.length ? Math.max(...moneyValues) : '';
   record.amount = amount ? String(amount) : '';
-
   record.creditCopy = findNamedField(text, [
-    /(?:credit copy|copy|announcement|audio credit|underwriting copy)\s*[:\-]\s*([\s\S]{20,400})/i,
+    /(?:credit copy|copy|announcement|audio credit|underwriting copy)\s*[:\-]\s*([\s\S]{20,500})/i,
   ], true) || extractQuotedBlock(text);
 
-  if (!record.underwriterName && record.email) {
-    record.underwriterName = emailDomainToName(record.email);
-  }
-
+  if (!record.underwriterName && record.email) record.underwriterName = emailDomainToName(record.email);
   return record;
 }
 
@@ -352,14 +376,31 @@ function detectContractType(lower, lines, fileName) {
   if (lower.includes('american revolution')) return 'American Revolution';
   if (lower.includes('underwriter') && lower.includes('contract')) return 'Underwriter Contract';
   if (lower.includes('underwriting')) return 'Underwriting';
-  if (fileName) return fileName.replace(/\.[^.]+$/, '');
-  return '';
+  const line = lines.find((item) => /contract|agreement|underwriting|sponsorship/i.test(item));
+  if (line) return line.slice(0, 80);
+  return fileName.replace(/\.[^.]+$/, '');
+}
+
+function findPlacementDetail(text, lines) {
+  const direct = findNamedField(text, [
+    /(?:day[ -]?part|daypart)\s*[:\-]\s*(.+)/i,
+    /(?:placement|schedule|program\/day\/day-part|program\s*\/\s*day\s*\/\s*day-part)\s*[:\-]\s*(.+)/i,
+    /(?:run(?:s)? on|air(?:s|ing)? on)\s*[:\-]\s*(.+)/i,
+    /(?:program and daypart|program daypart)\s*[:\-]\s*(.+)/i,
+  ]);
+  if (direct) return direct;
+
+  const candidate = lines.find((line) => {
+    const lower = line.toLowerCase();
+    return line.length < 120 && /(monday|tuesday|wednesday|thursday|friday|saturday|sunday|weekday|weekend|morning|afternoon|evening|overnight|drive|news hour|edition|program)/i.test(lower);
+  });
+  return candidate || '';
 }
 
 function guessProgramName(lines, lower) {
   const candidates = lines.filter((line) => {
     const l = line.toLowerCase();
-    return l.length > 5 && l.length < 80 && !/(wnmu|contract|agreement|phone|email|address|date|amount|signature)/i.test(l);
+    return l.length > 5 && l.length < 90 && !/(wnmu|contract|agreement|phone|email|address|date|amount|signature)/i.test(l);
   });
   const known = candidates.find((line) => /american revolution|pbs|program|series|special/i.test(line));
   return known || '';
@@ -376,20 +417,6 @@ function guessEntityLine(lines, fileName) {
   return fileName.replace(/\.[^.]+$/, '');
 }
 
-function emailDomainToName(email) {
-  const domain = (email.split('@')[1] || '').replace(/\.[a-z]{2,}$/i, '');
-  return domain
-    .split(/[.-]/)
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(' ');
-}
-
-function extractQuotedBlock(text) {
-  const match = text.match(/["“]([^"”]{20,500})["”]/);
-  return match?.[1]?.trim() || '';
-}
-
 function findNamedField(text, patterns, multiLine = false) {
   for (const pattern of patterns) {
     const match = text.match(pattern);
@@ -399,6 +426,20 @@ function findNamedField(text, patterns, multiLine = false) {
     }
   }
   return '';
+}
+
+function extractQuotedBlock(text) {
+  const match = text.match(/["“]([^"”]{20,500})["”]/);
+  return match?.[1]?.trim() || '';
+}
+
+function emailDomainToName(email) {
+  const domain = (email.split('@')[1] || '').replace(/\.[a-z]{2,}$/i, '');
+  return domain
+    .split(/[.-]/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
 }
 
 function extractDates(text) {
@@ -449,22 +490,25 @@ function uniqueMatches(values) {
 function upsertRecord(record) {
   const existingIndex = state.records.findIndex((item) => item.sourceHash && item.sourceHash === record.sourceHash);
   if (existingIndex >= 0) {
-    state.records[existingIndex] = { ...record, id: state.records[existingIndex].id };
+    state.records[existingIndex] = sanitizeRecord({ ...record, id: state.records[existingIndex].id });
   } else {
-    state.records.unshift(record);
+    state.records.unshift(sanitizeRecord(record));
   }
 }
 
 function recalcFlags() {
   const quarterRange = getQuarterRange();
   const records = state.records.map(sanitizeRecord);
+
   for (const record of records) {
     record.issues = [];
-    if (!record.underwriterName) record.issues.push({ type: 'warn', code: 'missing_name', label: 'Missing underwriter' });
+    if (!record.underwriterName) record.issues.push({ type: 'warn', code: 'missing_name', label: 'Missing name' });
     if (!record.startDate || !record.endDate) record.issues.push({ type: 'warn', code: 'missing_dates', label: 'Missing date(s)' });
     if (record.startDate && record.endDate && record.startDate > record.endDate) {
       record.issues.push({ type: 'bad', code: 'bad_range', label: 'Start after end' });
     }
+    if (!record.placementDetail) record.issues.push({ type: 'warn', code: 'missing_placement', label: 'Missing placement' });
+    if (!record.creditRuns) record.issues.push({ type: 'warn', code: 'missing_runs', label: 'Missing exact runs' });
     if (activeInQuarter(record, quarterRange.start, quarterRange.end)) {
       record.issues.push({ type: 'ok', code: 'in_quarter', label: 'In quarter' });
     }
@@ -483,12 +527,13 @@ function recalcFlags() {
         a.issues.push({ type: 'bad', code: 'duplicate', label: `Duplicate candidate: ${b.underwriterName || b.sourceFileName}` });
         b.issues.push({ type: 'bad', code: 'duplicate', label: `Duplicate candidate: ${a.underwriterName || a.sourceFileName}` });
       } else if (sameUnderwriter && dateRangesOverlap(a.startDate, a.endDate, b.startDate, b.endDate)) {
-        a.issues.push({ type: 'warn', code: 'overlap', label: `Overlap with same underwriter: ${b.sourceFileName || b.underwriterName}` });
-        b.issues.push({ type: 'warn', code: 'overlap', label: `Overlap with same underwriter: ${a.sourceFileName || a.underwriterName}` });
+        a.issues.push({ type: 'warn', code: 'overlap', label: `Overlap with same name: ${b.sourceFileName || b.underwriterName}` });
+        b.issues.push({ type: 'warn', code: 'overlap', label: `Overlap with same name: ${a.sourceFileName || a.underwriterName}` });
       }
     }
   }
 
+  for (const record of records) record.issueSummary = buildIssueSummary(record.issues);
   state.records = records;
 }
 
@@ -511,13 +556,6 @@ function activeInQuarter(record, quarterStart, quarterEnd) {
   return record.startDate <= quarterEnd && record.endDate >= quarterStart;
 }
 
-function renderAll() {
-  renderTable();
-  renderSelectedRecord();
-  renderMetrics();
-  renderNarrative();
-}
-
 function getFilteredRecords() {
   const query = els.searchInput.value.trim().toLowerCase();
   const filter = els.issueFilter.value;
@@ -528,121 +566,244 @@ function getFilteredRecords() {
       record.underwriterName,
       record.contractType,
       record.programName,
+      record.placementDetail,
       record.email,
       record.phone,
       record.notes,
       record.sourceFileName,
       record.creditCopy,
+      record.creditRuns,
       record.rawText,
     ].join(' ').toLowerCase();
 
     if (query && !haystack.includes(query)) return false;
-
     if (filter === 'issue' && !record.issues.some((issue) => issue.type !== 'ok')) return false;
     if (filter === 'duplicate' && !record.issues.some((issue) => issue.code === 'duplicate')) return false;
     if (filter === 'overlap' && !record.issues.some((issue) => issue.code === 'overlap')) return false;
     if (filter === 'quarter' && !activeInQuarter(record, quarter.start, quarter.end)) return false;
+    if (filter === 'missing_runs' && record.creditRuns) return false;
     return true;
   });
 }
 
-function renderTable() {
-  const rows = getFilteredRecords();
-  els.recordsBody.innerHTML = '';
+function getSortedRecords(records) {
+  const list = [...records];
+  const dir = state.sortDir === 'asc' ? 1 : -1;
+  list.sort((a, b) => compareForSort(a, b, state.sortKey) * dir);
+  return list;
+}
+
+function compareForSort(a, b, key) {
+  switch (key) {
+    case 'amount':
+      return Number(a.amount || 0) - Number(b.amount || 0);
+    case 'startDate':
+    case 'endDate':
+      return String(a[key] || '9999-99-99').localeCompare(String(b[key] || '9999-99-99'));
+    case 'flags':
+      return flagScore(b) - flagScore(a);
+    default:
+      return String(a[key] || '').localeCompare(String(b[key] || ''), undefined, { sensitivity: 'base' });
+  }
+}
+
+function flagScore(record) {
+  return record.issues.reduce((score, issue) => {
+    if (issue.type === 'bad') return score + 100;
+    if (issue.type === 'warn') return score + 10;
+    return score + 1;
+  }, 0);
+}
+
+function toggleSort(key) {
+  if (state.sortKey === key) {
+    state.sortDir = state.sortDir === 'asc' ? 'desc' : 'asc';
+  } else {
+    state.sortKey = key;
+    state.sortDir = key === 'amount' ? 'desc' : 'asc';
+  }
+  renderContractsTable();
+  renderSortButtons();
+}
+
+function renderAll() {
+  renderTabs();
+  renderSortButtons();
+  renderContractsTable();
+  renderQuarterly();
+  renderMetrics();
+  renderNarrative();
+  syncModal();
+}
+
+function renderTabs() {
+  els.tabButtons.forEach((button) => button.classList.toggle('active', button.dataset.tab === state.currentTab));
+  els.tabPanels.forEach((panel) => panel.classList.toggle('active', panel.id === `tab-${state.currentTab}`));
+}
+
+function renderSortButtons() {
+  els.sortButtons.forEach((button) => {
+    const isActive = button.dataset.sort === state.sortKey;
+    button.classList.toggle('active', isActive);
+    const arrow = button.querySelector('.sort-arrow');
+    if (arrow) arrow.textContent = isActive ? (state.sortDir === 'asc' ? '▲' : '▼') : '↕';
+  });
+}
+
+function renderContractsTable() {
+  const rows = getSortedRecords(getFilteredRecords());
+  els.contractsBody.innerHTML = '';
 
   if (!rows.length) {
-    els.recordsBody.innerHTML = `<tr><td colspan="8" class="muted">No matching records.</td></tr>`;
+    els.contractsBody.innerHTML = '<tr><td colspan="9" class="muted">No matching records.</td></tr>';
     return;
   }
 
   for (const record of rows) {
-    const fragment = els.rowTemplate.content.cloneNode(true);
-    const tr = fragment.querySelector('tr');
-    if (record.id === state.selectedId) tr.classList.add('selected-row');
-
+    const fragment = els.contractRowTemplate.content.cloneNode(true);
     fragment.querySelector('.row-underwriter').textContent = record.underwriterName || '—';
-    fragment.querySelector('.row-type').textContent = record.contractType || '—';
     fragment.querySelector('.row-start').textContent = record.startDate || '—';
     fragment.querySelector('.row-end').textContent = record.endDate || '—';
+    fragment.querySelector('.row-type').textContent = record.contractType || '—';
+    fragment.querySelector('.row-placement').textContent = record.placementDetail || '—';
     fragment.querySelector('.row-amount').textContent = formatMoney(record.amount);
     fragment.querySelector('.row-source').textContent = record.sourceFileName || '—';
-
-    const flagCell = fragment.querySelector('.row-flags');
-    flagCell.appendChild(buildFlagBadges(record.issues));
-
-    fragment.querySelector('.row-open').addEventListener('click', () => {
-      state.selectedId = record.id;
-      persist();
-      renderAll();
-    });
-
-    els.recordsBody.appendChild(fragment);
+    fragment.querySelector('.row-flags').appendChild(buildFlagBadges(record.issues));
+    fragment.querySelector('.row-open').addEventListener('click', () => openModal(record.id));
+    els.contractsBody.appendChild(fragment);
   }
 }
 
-function buildFlagBadges(issues) {
-  const wrap = document.createElement('div');
-  wrap.className = 'flag-badges';
-  if (!issues.length) {
-    wrap.appendChild(makeBadge('Clean', 'ok'));
-    return wrap;
+function renderQuarterly() {
+  const quarter = getQuarterRange();
+  const rows = getSortedRecords(state.records.filter((record) => activeInQuarter(record, quarter.start, quarter.end)));
+  els.quarterlyBody.innerHTML = '';
+  els.quarterSummaryBadge.textContent = `${rows.length} record${rows.length === 1 ? '' : 's'}`;
+
+  if (!rows.length) {
+    els.quarterlyBody.innerHTML = '<tr><td colspan="6" class="muted">No records active in the selected quarter.</td></tr>';
+    return;
   }
-  issues.forEach((issue) => {
-    if (issue.code === 'in_quarter' && issues.length > 1) return;
-    wrap.appendChild(makeBadge(issue.label, issue.type));
+
+  for (const record of rows) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${escapeHtml(record.underwriterName || '—')}</td>
+      <td>${escapeHtml(record.placementDetail || record.programName || '—')}</td>
+      <td>${escapeHtml(record.startDate || '—')}</td>
+      <td>${escapeHtml(record.endDate || '—')}</td>
+      <td>${escapeHtml(formatMoney(record.amount))}</td>
+      <td>${escapeHtml(record.creditRuns || '—')}</td>
+    `;
+    els.quarterlyBody.appendChild(tr);
+  }
+}
+
+function renderMetrics() {
+  const quarter = getQuarterRange();
+  const inQuarter = state.records.filter((record) => activeInQuarter(record, quarter.start, quarter.end));
+  const totalValue = inQuarter.reduce((sum, record) => sum + Number(record.amount || 0), 0);
+  const flagged = state.records.filter((record) => record.issues.some((issue) => issue.type !== 'ok')).length;
+  const duplicates = state.records.filter((record) => record.issues.some((issue) => issue.code === 'duplicate')).length;
+  const uniqueUnderwriters = new Set(inQuarter.map((record) => normalizeName(record.underwriterName)).filter(Boolean)).size;
+  const missingRuns = inQuarter.filter((record) => !record.creditRuns).length;
+  const metrics = [
+    ['Records', state.records.length],
+    ['In quarter', inQuarter.length],
+    ['Unique names', uniqueUnderwriters],
+    ['Quarter value', formatMoney(totalValue)],
+    ['Flagged records', flagged],
+    ['Missing exact runs', missingRuns],
+    ['Duplicate candidates', duplicates],
+    ['Sort mode', `${labelForSort(state.sortKey)} ${state.sortDir}`],
+  ];
+
+  els.metrics.innerHTML = '';
+  metrics.forEach(([label, value]) => {
+    const card = document.createElement('div');
+    card.className = 'metric';
+    card.innerHTML = `<span class="metric-label">${escapeHtml(label)}</span><span class="metric-value">${escapeHtml(String(value))}</span>`;
+    els.metrics.appendChild(card);
   });
-  return wrap;
 }
 
-function makeBadge(text, type = 'ok') {
-  const span = document.createElement('span');
-  span.className = `badge ${type === 'bad' ? 'badge-bad' : type === 'warn' ? 'badge-warn' : 'badge-ok'}`;
-  span.textContent = text;
-  return span;
+function renderNarrative() {
+  const quarter = getQuarterRange();
+  const inQuarter = getSortedRecords(state.records.filter((record) => activeInQuarter(record, quarter.start, quarter.end)));
+  const uniqueUnderwriters = new Set(inQuarter.map((record) => normalizeName(record.underwriterName)).filter(Boolean)).size;
+  const totalValue = inQuarter.reduce((sum, record) => sum + Number(record.amount || 0), 0);
+  const overlapCount = state.records.filter((record) => record.issues.some((issue) => issue.code === 'overlap')).length;
+  const duplicateCount = state.records.filter((record) => record.issues.some((issue) => issue.code === 'duplicate')).length;
+  const missingRuns = inQuarter.filter((record) => !record.creditRuns).length;
+
+  const lines = [
+    `Quarter reviewed: ${quarter.start} through ${quarter.end}`,
+    `Active contracts in quarter: ${inQuarter.length}`,
+    `Unique underwriters in quarter: ${uniqueUnderwriters}`,
+    `Total contract value represented in active quarter records: ${formatMoney(totalValue)}`,
+    `Duplicate candidates needing review: ${duplicateCount}`,
+    `Same-underwriter overlap flags needing review: ${overlapCount}`,
+    `Quarter records still missing exact credit run dates / times: ${missingRuns}`,
+    '',
+    'Quarter detail:',
+    ...inQuarter.map((record) => {
+      const parts = [
+        record.underwriterName || 'Unnamed record',
+        `${record.startDate || '??'} to ${record.endDate || '??'}`,
+        formatMoney(record.amount),
+        record.placementDetail || record.programName || 'Placement blank',
+        record.creditRuns ? `Runs entered` : `Runs still blank`,
+      ];
+      return `- ${parts.join(' | ')}`;
+    }),
+  ];
+
+  els.narrativeBox.value = lines.join('\n');
 }
 
-function renderSelectedRecord() {
+function openModal(recordId) {
+  state.selectedId = recordId;
+  syncModal();
+  els.recordModal.classList.remove('hidden');
+  els.recordModal.setAttribute('aria-hidden', 'false');
+}
+
+function closeModal() {
+  els.recordModal.classList.add('hidden');
+  els.recordModal.setAttribute('aria-hidden', 'true');
+}
+
+function syncModal() {
   const record = state.records.find((item) => item.id === state.selectedId);
   if (!record) {
-    els.detailBadge.textContent = 'Nothing selected';
-    els.recordIssues.textContent = 'No record selected.';
+    els.modalSubhead.textContent = 'No record selected';
     els.recordForm.reset();
     return;
   }
 
-  els.detailBadge.textContent = record.sourceFileName || 'Manual record';
+  els.modalSubhead.textContent = record.sourceFileName || 'Manual record';
   for (const element of els.recordForm.elements) {
     if (!element.name) continue;
+    if (element.name === 'issueSummary') {
+      element.value = record.issueSummary || 'No flags';
+      continue;
+    }
     element.value = record[element.name] ?? '';
   }
-  els.recordIssues.textContent = record.issues.length
-    ? record.issues.map((issue) => `• ${issue.label}`).join('\n')
-    : 'No issues flagged for this record.';
 }
 
 function saveFormToSelected() {
   const record = state.records.find((item) => item.id === state.selectedId);
   if (!record) return;
   for (const element of els.recordForm.elements) {
-    if (!element.name) continue;
+    if (!element.name || element.name === 'issueSummary') continue;
     record[element.name] = element.value;
   }
   recalcFlags();
   persist();
   renderAll();
+  syncModal();
   setStatus(`Saved ${record.underwriterName || record.sourceFileName || 'record'}.`);
-}
-
-function deleteSelected() {
-  const record = state.records.find((item) => item.id === state.selectedId);
-  if (!record) return;
-  const ok = confirm(`Delete ${record.underwriterName || record.sourceFileName || 'this record'}?`);
-  if (!ok) return;
-  state.records = state.records.filter((item) => item.id !== state.selectedId);
-  state.selectedId = state.records[0]?.id || null;
-  recalcFlags();
-  persist();
-  renderAll();
 }
 
 function duplicateSelected() {
@@ -659,6 +820,22 @@ function duplicateSelected() {
   recalcFlags();
   persist();
   renderAll();
+  syncModal();
+  setStatus('Record duplicated.');
+}
+
+function deleteSelected() {
+  const record = state.records.find((item) => item.id === state.selectedId);
+  if (!record) return;
+  const ok = confirm(`Delete ${record.underwriterName || record.sourceFileName || 'this record'}?`);
+  if (!ok) return;
+  state.records = state.records.filter((item) => item.id !== state.selectedId);
+  state.selectedId = state.records[0]?.id || null;
+  recalcFlags();
+  persist();
+  renderAll();
+  syncModal();
+  if (!state.selectedId) closeModal();
 }
 
 function clearAllRecords() {
@@ -668,76 +845,30 @@ function clearAllRecords() {
   state.selectedId = null;
   persist();
   renderAll();
+  closeModal();
   setStatus('Local database cleared.');
-}
-
-function renderMetrics() {
-  const quarter = getQuarterRange();
-  const inQuarter = state.records.filter((record) => activeInQuarter(record, quarter.start, quarter.end));
-  const totalValue = inQuarter.reduce((sum, record) => sum + Number(record.amount || 0), 0);
-  const flagged = state.records.filter((record) => record.issues.some((issue) => issue.type !== 'ok')).length;
-  const duplicates = state.records.filter((record) => record.issues.some((issue) => issue.code === 'duplicate')).length;
-  const uniqueUnderwriters = new Set(inQuarter.map((record) => normalizeName(record.underwriterName)).filter(Boolean)).size;
-
-  const metrics = [
-    ['Records', state.records.length],
-    ['In quarter', inQuarter.length],
-    ['Unique underwriters', uniqueUnderwriters],
-    ['Quarter value', formatMoney(totalValue)],
-    ['Flagged records', flagged],
-    ['Duplicate candidates', duplicates],
-  ];
-
-  els.metrics.innerHTML = '';
-  metrics.forEach(([label, value]) => {
-    const card = document.createElement('div');
-    card.className = 'metric';
-    card.innerHTML = `<span class="metric-label">${escapeHtml(label)}</span><span class="metric-value">${escapeHtml(String(value))}</span>`;
-    els.metrics.appendChild(card);
-  });
-}
-
-function renderNarrative() {
-  const quarter = getQuarterRange();
-  const inQuarter = state.records.filter((record) => activeInQuarter(record, quarter.start, quarter.end));
-  const uniqueUnderwriters = new Set(inQuarter.map((record) => normalizeName(record.underwriterName)).filter(Boolean)).size;
-  const totalValue = inQuarter.reduce((sum, record) => sum + Number(record.amount || 0), 0);
-  const overlapCount = state.records.filter((record) => record.issues.some((issue) => issue.code === 'overlap')).length;
-  const duplicateCount = state.records.filter((record) => record.issues.some((issue) => issue.code === 'duplicate')).length;
-
-  const lines = [
-    `Quarter reviewed: ${quarter.start} through ${quarter.end}`,
-    `Active contracts in quarter: ${inQuarter.length}`,
-    `Unique underwriters in quarter: ${uniqueUnderwriters}`,
-    `Total contract value represented in active quarter records: ${formatMoney(totalValue)}`,
-    `Duplicate candidates needing review: ${duplicateCount}`,
-    `Same-underwriter overlap flags needing review: ${overlapCount}`,
-    '',
-    'Underwriters active in quarter:',
-    ...inQuarter
-      .slice()
-      .sort((a, b) => (a.underwriterName || '').localeCompare(b.underwriterName || ''))
-      .map((record) => {
-        const detail = [record.contractType, record.programName].filter(Boolean).join(' — ');
-        return `- ${record.underwriterName || 'Unnamed record'} | ${record.startDate || '??'} to ${record.endDate || '??'} | ${formatMoney(record.amount)}${detail ? ` | ${detail}` : ''}`;
-      }),
-  ];
-
-  els.narrativeBox.value = lines.join('\n');
 }
 
 function exportQuarterCsv() {
   const quarter = getQuarterRange();
-  const rows = state.records.filter((record) => activeInQuarter(record, quarter.start, quarter.end));
+  const rows = getSortedRecords(state.records.filter((record) => activeInQuarter(record, quarter.start, quarter.end)));
   const columns = [
-    'underwriterName', 'contractType', 'programName', 'contactPerson', 'email', 'phone',
-    'startDate', 'endDate', 'amount', 'creditCount', 'programCount', 'sourceFileName', 'notes'
+    'underwriterName',
+    'startDate',
+    'endDate',
+    'issueSummary',
+    'contractType',
+    'placementDetail',
+    'amount',
+    'sourceFileName',
+    'creditRuns',
+    'notes',
   ];
   const csv = [
     columns.join(','),
     ...rows.map((record) => columns.map((key) => csvEscape(record[key] ?? '')).join(',')),
   ].join('\n');
-  downloadFile(`wnmu-underwriters-${quarter.start}-to-${quarter.end}.csv`, csv, 'text/csv;charset=utf-8');
+  downloadFile(`wnmu-quarterly-underwriters-${quarter.start}-to-${quarter.end}.csv`, csv, 'text/csv;charset=utf-8');
 }
 
 function exportJsonBackup() {
@@ -776,6 +907,44 @@ function getQuarterRange() {
     start: els.quarterStart.value || '2026-01-01',
     end: els.quarterEnd.value || '2026-03-31',
   };
+}
+
+function buildFlagBadges(issues) {
+  const wrap = document.createElement('div');
+  wrap.className = 'flag-badges';
+  const visible = issues.filter((issue) => !(issue.code === 'in_quarter' && issues.length > 1));
+  if (!visible.length) {
+    wrap.appendChild(makeBadge('Clean', 'ok'));
+    return wrap;
+  }
+  visible.forEach((issue) => wrap.appendChild(makeBadge(issue.label, issue.type)));
+  return wrap;
+}
+
+function makeBadge(text, type = 'ok') {
+  const span = document.createElement('span');
+  span.className = `badge ${type === 'bad' ? 'badge-bad' : type === 'warn' ? 'badge-warn' : 'badge-ok'}`;
+  span.textContent = text;
+  return span;
+}
+
+function buildIssueSummary(issues) {
+  const visible = (issues || []).filter((issue) => issue.code !== 'in_quarter');
+  return visible.length ? visible.map((issue) => issue.label).join(' | ') : 'No flags';
+}
+
+function labelForSort(key) {
+  const labels = {
+    underwriterName: 'underwriter',
+    startDate: 'start',
+    endDate: 'end',
+    flags: 'flags',
+    contractType: 'type',
+    placementDetail: 'placement',
+    amount: 'amount',
+    sourceFileName: 'source',
+  };
+  return labels[key] || key;
 }
 
 function formatMoney(value) {
