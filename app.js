@@ -1,5 +1,5 @@
-const CURRENT_STORAGE_KEY = 'wnmu-underwriter-intake-v0.5.2';
-const LEGACY_STORAGE_KEYS = ['wnmu-underwriter-intake-v0.5.0', 'wnmu-underwriter-intake-v0.4.0', 'wnmu-underwriter-intake-v0.3.1', 'wnmu-underwriter-intake-v0.2.0', 'wnmu-underwriter-intake-v0.1.0'];
+const CURRENT_STORAGE_KEY = 'wnmu-underwriter-intake-v0.5.3';
+const LEGACY_STORAGE_KEYS = ['wnmu-underwriter-intake-v0.5.2', 'wnmu-underwriter-intake-v0.5.0', 'wnmu-underwriter-intake-v0.4.0', 'wnmu-underwriter-intake-v0.3.1', 'wnmu-underwriter-intake-v0.2.0', 'wnmu-underwriter-intake-v0.1.0'];
 const OCR_PAGE_LIMIT = 4;
 
 const DEFAULT_CONFIG = {
@@ -143,7 +143,6 @@ function bindEvents() {
   document.getElementById('exportQuarterCsvBtn').addEventListener('click', exportQuarterCsv);
   document.getElementById('copyNarrativeBtn').addEventListener('click', copyNarrative);
   document.getElementById('saveRecordBtn').addEventListener('click', saveAndCloseSelected);
-  document.getElementById('duplicateRecordBtn').addEventListener('click', duplicateSelected);
   document.getElementById('deleteRecordBtn').addEventListener('click', requestDeleteSelected);
 
   els.importJsonInput.addEventListener('change', importJsonBackup);
