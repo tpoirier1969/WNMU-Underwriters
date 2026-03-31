@@ -19,7 +19,7 @@
         <p class="subtitle">Contract intake, dedupe review, overlap checks, and quarterly prep</p>
       </div>
       <div class="topbar-right">
-        <div class="version-pill">v0.5.4</div>
+        <div class="version-pill">v0.5.5</div>
         <div id="cloudStatusBadge" class="cloud-pill cloud-local">Cloud: local only</div>
       </div>
     </header>
@@ -241,33 +241,29 @@
           Phone
           <input name="phone" type="text" />
         </label>
-        <label class="field-source">
-          Source
-          <input name="sourceFileName" type="text" readonly />
-        </label>
-        <label class="field-flags">
+        <label class="field-flags field-flags-short">
           Flags
           <input name="issueSummary" type="text" readonly />
         </label>
-        <label class="field-program-clue">
+        <label class="field-program-clue field-program-clue-wide">
           Program title clue
           <input name="programName" type="text" />
         </label>
+        <label class="field-notes field-notes-wide">
+          Notes
+          <textarea name="notes" class="compact-area notes-area" rows="3"></textarea>
+        </label>
         <label class="field-credit-runs field-text-quad">
           Exact credit run dates / times
-          <textarea name="creditRuns" class="compact-area" rows="4" placeholder="Paste or type the exact air dates and times here when you have them."></textarea>
+          <textarea name="creditRuns" class="compact-area compact-area-small" rows="3" placeholder="Paste or type the exact air dates and times here when you have them."></textarea>
         </label>
         <label class="field-credit-copy field-text-quad">
           Audio credit copy
-          <textarea name="creditCopy" class="compact-area" rows="4"></textarea>
+          <textarea name="creditCopy" class="compact-area compact-area-small" rows="3"></textarea>
         </label>
-        <label class="field-notes field-text-quad">
-          Notes
-          <textarea name="notes" class="compact-area" rows="4"></textarea>
-        </label>
-        <label class="field-raw-text field-text-quad">
+        <label class="field-raw-text field-raw-text-large">
           Raw extracted text
-          <textarea name="rawText" class="raw-text compact-area" rows="4"></textarea>
+          <textarea name="rawText" class="raw-text compact-area raw-text-large" rows="8"></textarea>
         </label>
       </form>
 

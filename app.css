@@ -560,10 +560,12 @@ textarea {
 .compact-form-grid .field-contact { grid-column: span 3; }
 .compact-form-grid .field-email { grid-column: span 5; }
 .compact-form-grid .field-phone { grid-column: span 4; }
-.compact-form-grid .field-source { grid-column: span 4; }
-.compact-form-grid .field-flags { grid-column: span 3; }
-.compact-form-grid .field-program-clue { grid-column: span 5; }
-.compact-form-grid .field-text-quad { grid-column: span 3; }
+.compact-form-grid .field-flags { grid-column: span 2; }
+.compact-form-grid .field-program-clue { grid-column: span 4; }
+.compact-form-grid .field-notes { grid-column: span 6; }
+.compact-form-grid .field-credit-runs { grid-column: span 3; }
+.compact-form-grid .field-credit-copy { grid-column: span 3; }
+.compact-form-grid .field-raw-text { grid-column: span 6; }
 .full-width {
   grid-column: 1 / -1;
 }
@@ -575,6 +577,15 @@ textarea {
 .compact-area {
   min-height: 68px;
   line-height: 1.2;
+}
+.compact-area-small {
+  min-height: 56px;
+}
+.notes-area {
+  min-height: 56px;
+}
+.raw-text-large {
+  min-height: 182px;
 }
 .modal-actions {
   position: sticky;
@@ -653,10 +664,12 @@ textarea {
   .compact-form-grid .field-contact,
   .compact-form-grid .field-email,
   .compact-form-grid .field-phone,
-  .compact-form-grid .field-source,
   .compact-form-grid .field-flags,
   .compact-form-grid .field-program-clue,
-  .compact-form-grid .field-text-quad {
+  .compact-form-grid .field-notes,
+  .compact-form-grid .field-credit-runs,
+  .compact-form-grid .field-credit-copy,
+  .compact-form-grid .field-raw-text {
     grid-column: span 6;
   }
 }
